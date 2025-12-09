@@ -12,12 +12,12 @@ npm install @chaosity/location-client-react @chaosity/location-client
 
 ```tsx
 import { LocationClientProvider, useLocationClient } from '@chaosity/location-client-react'
-import { places } from '@chaosity/location-client'
+import { SuggestCommand } from '@chaosity/location-client'
 
 // 1. Wrap your app with the provider
 function App() {
   return (
-    <LocationClientProvider apiUrl="https://api.example.com" token="your-token">
+    <LocationClientProvider getConfig={getLocationConfig}>
       <MapComponent />
     </LocationClientProvider>
   )
@@ -25,10 +25,12 @@ function App() {
 
 // 2. Use the client in any component
 function MapComponent() {
-  const client = useLocationClient()
+  const { client, config, loading, error } = useLocationClient()
   
   const searchPlaces = async (query: string) => {
-    const command = new places.SuggestCommand({
+    if (!client) return
+    
+    const command = new SuggestCommand({
       QueryText: query,
       MaxResults: 5
     })
@@ -47,17 +49,13 @@ function MapComponent() {
 Provides the location client to all child components.
 
 ```tsx
-<LocationClientProvider 
-  apiUrl="https://api.example.com"
-  token="your-bearer-token"
->
+<LocationClientProvider getConfig={getLocationConfig}>
   {children}
 </LocationClientProvider>
 ```
 
 **Props:**
-- `apiUrl` (string, required) - API endpoint URL
-- `token` (string, required) - Bearer token for authentication
+- `getConfig` (function, required) - Async function that returns `{ apiUrl: string, token: string }`
 - `children` (ReactNode, required) - Child components
 
 ### useLocationClient
@@ -65,14 +63,18 @@ Provides the location client to all child components.
 Hook to access the location client in any component.
 
 ```tsx
-const client = useLocationClient()
+const { client, config, loading, error } = useLocationClient()
 ```
 
-**Returns:** `GeoPlacesClient` instance
+**Returns:**
+- `client` (GeoPlacesClient | null) - The location client instance
+- `config` (ClientConfig | null) - The client configuration (apiUrl, token)
+- `loading` (boolean) - Whether the client is initializing
+- `error` (string | null) - Error message if initialization failed
 
 **Throws:** Error if used outside `LocationClientProvider`
 
-## Usage with Server Actions (Next.js)
+## Usage with Next.js Server Actions
 
 ```tsx
 // app/actions/location.ts (Server-side)
@@ -96,19 +98,97 @@ export async function getLocationConfig() {
   }
 }
 
-// app/page.tsx (Client-side)
+// app/layout.tsx (Client-side)
 'use client'
+
 import { LocationClientProvider } from '@chaosity/location-client-react'
 import { getLocationConfig } from './actions/location'
 
-export default async function Page() {
-  const config = await getLocationConfig()
-  
+export default function RootLayout({ children }) {
   return (
-    <LocationClientProvider {...config}>
-      <MapComponent />
+    <LocationClientProvider getConfig={getLocationConfig}>
+      {children}
     </LocationClientProvider>
   )
+}
+```
+
+## Complete Example with MapLibre
+
+```tsx
+'use client'
+
+import { useLocationClient } from '@chaosity/location-client-react'
+import { GeoPlaces } from '@chaosity/location-client'
+import maplibregl from 'maplibre-gl'
+import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
+import { useEffect, useRef } from 'react'
+
+export default function MapComponent() {
+  const mapContainer = useRef<HTMLDivElement>(null)
+  const map = useRef<maplibregl.Map | null>(null)
+  const { config, client, loading, error } = useLocationClient()
+
+  useEffect(() => {
+    if (!mapContainer.current || map.current || loading || !config || !client) return
+
+    // Initialize map
+    const mapInstance = new maplibregl.Map({
+      container: mapContainer.current,
+      style: `${config.apiUrl}/maps/Standard/descriptor`,
+      center: [-123.12, 49.28],
+      zoom: 10,
+      transformRequest: (url) => {
+        if (url.startsWith(config.apiUrl)) {
+          return {
+            url,
+            headers: { 'Authorization': `Bearer ${config.token}` }
+          }
+        }
+        return { url }
+      }
+    })
+
+    // Add navigation controls
+    mapInstance.addControl(new maplibregl.NavigationControl(), 'top-right')
+
+    // Add geocoder
+    const geoPlaces = new GeoPlaces(config.apiUrl, config.token, mapInstance)
+    const geocoder = new MaplibreGeocoder(geoPlaces, {
+      maplibregl,
+      showResultsWhileTyping: true,
+      limit: 30
+    })
+    mapInstance.addControl(geocoder, 'top-left')
+
+    // Handle result selection
+    geocoder.on('result', async (event) => {
+      const { id, result_type } = event.result
+      if (result_type === 'Place') {
+        const details = await geoPlaces.searchByPlaceId(id)
+        console.log('Place details:', details)
+      }
+    })
+
+    map.current = mapInstance
+
+    return () => {
+      if (map.current) {
+        map.current.remove()
+        map.current = null
+      }
+    }
+  }, [config, client, loading])
+
+  if (error) {
+    return <div>Error: {error}</div>
+  }
+
+  if (loading) {
+    return <div>Loading map...</div>
+  }
+
+  return <div ref={mapContainer} style={{ width: '100%', height: '600px' }} />
 }
 ```
 
@@ -117,41 +197,49 @@ export default async function Page() {
 All AWS Location Service commands are available through the client:
 
 ```tsx
-import { places } from '@chaosity/location-client'
+import {
+  SuggestCommand,
+  GeocodeCommand,
+  ReverseGeocodeCommand,
+  GetPlaceCommand,
+  SearchTextCommand,
+  SearchNearbyCommand
+} from '@chaosity/location-client'
 
-// Autocomplete
-new places.SuggestCommand({ QueryText: 'Van', MaxResults: 5 })
+function MyComponent() {
+  const { client } = useLocationClient()
 
-// Geocoding
-new places.GeocodeCommand({ QueryText: 'Vancouver, BC' })
-
-// Reverse Geocoding
-new places.ReverseGeocodeCommand({ QueryPosition: [-123.1207, 49.2827] })
-
-// Place Details
-new places.GetPlaceCommand({ PlaceId: 'place-id' })
-
-// Search Nearby
-new places.SearchNearbyCommand({ QueryPosition: [-123.1207, 49.2827] })
-
-// Text Search
-new places.SearchTextCommand({ QueryText: 'coffee shops' })
+  const searchPlaces = async () => {
+    const response = await client.send(
+      new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 })
+    )
+    return response.ResultItems
+  }
+}
 ```
-
-See [@chaosity/location-client](https://www.npmjs.com/package/@chaosity/location-client) for complete documentation.
 
 ## TypeScript Support
 
 Full TypeScript support with types from AWS SDK:
 
 ```tsx
-import { places } from '@chaosity/location-client'
 import type { SuggestCommandOutput } from '@aws-sdk/client-geo-places'
 
+const { client } = useLocationClient()
+
 const response: SuggestCommandOutput = await client.send(
-  new places.SuggestCommand({ QueryText: 'Vancouver' })
+  new SuggestCommand({ QueryText: 'Vancouver' })
 )
 ```
+
+## Security Best Practices
+
+⚠️ **NEVER expose client credentials in browser code!**
+
+- The `getConfig` function should call a server-side API or Server Action
+- Store `client_id` and `client_secret` in server environment variables only
+- Only the JWT token should be sent to the browser
+- Tokens should be short-lived and refreshed as needed
 
 ## License
 
