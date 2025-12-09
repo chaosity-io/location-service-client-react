@@ -20,12 +20,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chaosity-io/location-service-workspace.git",
-    "directory": "location-service-client-react"
+    "url": "https://github.com/chaosity-io/location-service-client-react.git"
   },
-  "homepage": "https://github.com/chaosity-io/location-service-workspace/tree/main/location-service-client-react",
+  "homepage": "https://github.com/chaosity-io/location-service-client-react",
   "bugs": {
-    "url": "https://github.com/chaosity-io/location-service-workspace/issues"
+    "url": "https://github.com/chaosity-io/location-service-client-react/issues"
   },
   "dependencies": {
     "@chaosity/location-client": "^0.1.0"
