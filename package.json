@@ -1,0 +1,45 @@
+{
+  "name": "@chaosity/location-client-react",
+  "version": "0.1.1",
+  "description": "React bindings for Chaosity Location Service client",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "react",
+    "location",
+    "maps",
+    "geocoding",
+    "chaosity"
+  ],
+  "author": "Chaosity",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chaosity-io/location-service-workspace.git",
+    "directory": "location-service-client-react"
+  },
+  "homepage": "https://github.com/chaosity-io/location-service-workspace/tree/main/location-service-client-react",
+  "bugs": {
+    "url": "https://github.com/chaosity-io/location-service-workspace/issues"
+  },
+  "dependencies": {
+    "@chaosity/location-client": "^0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "typescript": "^5.0.0",
+    "react": "^18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
