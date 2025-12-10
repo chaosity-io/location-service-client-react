@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import { GeoPlacesClient, ClientConfig } from '@chaosity/location-client'
 
 interface LocationClientContextValue {
@@ -11,7 +12,7 @@ interface LocationClientContextValue {
 const LocationClientContext = createContext<LocationClientContextValue | undefined>(undefined)
 
 export interface LocationClientProviderProps {
-  children: React.ReactNode
+  children: ReactNode
   getConfig: () => Promise<ClientConfig>
 }
 
