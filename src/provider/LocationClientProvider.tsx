@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useRef, useCallback } f
 import type { ReactNode } from 'react'
 import { GeoPlacesClient, ClientConfig } from '@chaosity/location-client'
 import debug from 'debug'
+import { jwtDecode } from 'jwt-decode'
 
 const log = debug('location-client-react:provider')
 
@@ -52,11 +53,10 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
       const cfg = await getConfigRef.current()
       setConfig(cfg)
       setClient(new GeoPlacesClient(cfg))
-      if (cfg.expiresAt) {
-        expiresAtRef.current = cfg.expiresAt
-        const newExpiry = Math.floor((cfg.expiresAt - Date.now()) / 1000)
-        log('Token refreshed successfully (new token expires in %ds)', newExpiry)
-      }
+      const decoded = jwtDecode<{ exp: number }>(cfg.token)
+      expiresAtRef.current = decoded.exp * 1000
+      const newExpiry = Math.floor((decoded.exp * 1000 - Date.now()) / 1000)
+      log('Token refreshed successfully (new token expires in %ds)', newExpiry)
     } catch (err) {
       log('Token refresh failed: %s', err instanceof Error ? err.message : 'Unknown error')
       setError(err instanceof Error ? err.message : 'Failed to refresh token')
@@ -70,12 +70,14 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
       .then((cfg) => {
         setConfig(cfg)
         setClient(new GeoPlacesClient(cfg))
-        if (cfg.expiresAt) {
-          expiresAtRef.current = cfg.expiresAt
-          const expiry = Math.floor((cfg.expiresAt - Date.now()) / 1000)
+        // Decode JWT to get expiry
+        try {
+          const decoded = jwtDecode<{ exp: number }>(cfg.token)
+          expiresAtRef.current = decoded.exp * 1000 // Convert to milliseconds
+          const expiry = Math.floor((decoded.exp * 1000 - Date.now()) / 1000)
           log('Client initialized (token expires in %ds)', expiry)
-        } else {
-          log('Client initialized (no expiry info)')
+        } catch (err) {
+          log('Failed to decode token, no expiry info')
         }
         setLoading(false)
       })
@@ -84,7 +86,7 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
         setError(err instanceof Error ? err.message : 'Failed to initialize client')
         setLoading(false)
       })
-  }, [getConfig])
+  }, [])
 
   // Check token validity on every state change
   useEffect(() => {
