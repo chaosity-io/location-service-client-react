@@ -11,6 +11,8 @@ const log = debug('location-client-react:provider')
 interface LocationClientContextValue {
   config: ClientConfig | null
   client: GeoPlacesClient | null
+  getToken: () => string | undefined
+  ensureValidToken: () => Promise<void>
   loading: boolean
   error: string | null
 }
@@ -28,13 +30,18 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
   const [client, setClient] = useState<GeoPlacesClient | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const tokenRef = useRef<string | undefined>(undefined)
   const expiresAtRef = useRef<number | null>(null)
   const getConfigRef = useRef(getConfig)
+  const tokenGenerationCount = useRef(0)
 
   // Update ref when getConfig changes
   useEffect(() => {
     getConfigRef.current = getConfig
   }, [getConfig])
+
+  // Token getter function (stable reference)
+  const getToken = useCallback(() => tokenRef.current, [])
 
   // Check if token is expired or about to expire
   const isTokenExpired = useCallback(() => {
@@ -49,10 +56,29 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
     const timeUntilExpiry = expiresAtRef.current ? Math.floor((expiresAtRef.current - Date.now()) / 1000) : 0
     log('Token expired or expiring soon (expires in %ds), refreshing...', timeUntilExpiry)
 
+    tokenGenerationCount.current++
+
     try {
       const cfg = await getConfigRef.current()
       setConfig(cfg)
-      setClient(new GeoPlacesClient(cfg))
+      tokenRef.current = cfg.token
+      expiresAtRef.current = null
+      
+      const baseClient = new GeoPlacesClient(cfg)
+      const wrappedClient = new Proxy(baseClient, {
+        get(target, prop) {
+          if (prop === 'send') {
+            return async (command: any) => {
+              await ensureValidToken()
+              return target.send(command)
+            }
+          }
+          return (target as any)[prop]
+        }
+      }) as GeoPlacesClient
+      
+      setClient(wrappedClient)
+      
       const decoded = jwtDecode<{ exp: number }>(cfg.token)
       expiresAtRef.current = decoded.exp * 1000
       const newExpiry = Math.floor((decoded.exp * 1000 - Date.now()) / 1000)
@@ -66,14 +92,30 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
   // Initial load
   useEffect(() => {
     log('Initializing LocationClientProvider')
+    tokenGenerationCount.current++
     getConfig()
       .then((cfg) => {
         setConfig(cfg)
-        setClient(new GeoPlacesClient(cfg))
-        // Decode JWT to get expiry
+        tokenRef.current = cfg.token
+        
+        const baseClient = new GeoPlacesClient(cfg)
+        const wrappedClient = new Proxy(baseClient, {
+          get(target, prop) {
+            if (prop === 'send') {
+              return async (command: any) => {
+                await ensureValidToken()
+                return target.send(command)
+              }
+            }
+            return (target as any)[prop]
+          }
+        }) as GeoPlacesClient
+        
+        setClient(wrappedClient)
+        
         try {
           const decoded = jwtDecode<{ exp: number }>(cfg.token)
-          expiresAtRef.current = decoded.exp * 1000 // Convert to milliseconds
+          expiresAtRef.current = decoded.exp * 1000
           const expiry = Math.floor((decoded.exp * 1000 - Date.now()) / 1000)
           log('Client initialized (token expires in %ds)', expiry)
         } catch (err) {
@@ -86,7 +128,7 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
         setError(err instanceof Error ? err.message : 'Failed to initialize client')
         setLoading(false)
       })
-  }, [])
+  }, [ensureValidToken])
 
   // Check token validity on every state change
   useEffect(() => {
@@ -96,7 +138,7 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
   }, [config, loading, ensureValidToken])
 
   return (
-    <LocationClientContext.Provider value={{ config, client, loading, error }}>
+    <LocationClientContext.Provider value={{ config, client, getToken, ensureValidToken, loading, error }}>
       {children}
     </LocationClientContext.Provider>
   )

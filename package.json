@@ -28,9 +28,9 @@
     "url": "https://github.com/chaosity-io/location-service-client-react/issues"
   },
   "dependencies": {
-    "@chaosity/location-client": "file:../location-service-client",
-    "jwt-decode": "^4.0.0",
-    "debug": "^4.4.3"  
+    "@chaosity/location-client": "^0.1.5",
+    "debug": "^4.4.3",
+    "jwt-decode": "^4.0.0"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"
