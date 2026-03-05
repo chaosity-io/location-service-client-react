@@ -4,7 +4,6 @@ import { createContext, useContext, useEffect, useState, useRef, useCallback } f
 import type { ReactNode } from 'react'
 import { GeoPlacesClient, ClientConfig } from '@chaosity/location-client'
 import debug from 'debug'
-import { jwtDecode } from 'jwt-decode'
 
 const log = debug('location-client-react:provider')
 
@@ -62,7 +61,9 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
       const cfg = await getConfigRef.current()
       setConfig(cfg)
       tokenRef.current = cfg.token
-      expiresAtRef.current = null
+      
+      // Use expiresAt from config if provided, otherwise calculate from current time + 15 min
+      expiresAtRef.current = cfg.expiresAt || (Date.now() + 900000)
       
       const baseClient = new GeoPlacesClient(cfg)
       const wrappedClient = new Proxy(baseClient, {
@@ -79,9 +80,7 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
       
       setClient(wrappedClient)
       
-      const decoded = jwtDecode<{ exp: number }>(cfg.token)
-      expiresAtRef.current = decoded.exp * 1000
-      const newExpiry = Math.floor((decoded.exp * 1000 - Date.now()) / 1000)
+      const newExpiry = Math.floor((expiresAtRef.current - Date.now()) / 1000)
       log('Token refreshed successfully (new token expires in %ds)', newExpiry)
     } catch (err) {
       log('Token refresh failed: %s', err instanceof Error ? err.message : 'Unknown error')
@@ -113,14 +112,11 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
         
         setClient(wrappedClient)
         
-        try {
-          const decoded = jwtDecode<{ exp: number }>(cfg.token)
-          expiresAtRef.current = decoded.exp * 1000
-          const expiry = Math.floor((decoded.exp * 1000 - Date.now()) / 1000)
-          log('Client initialized (token expires in %ds)', expiry)
-        } catch (err) {
-          log('Failed to decode token, no expiry info')
-        }
+        // Use expiresAt from config if provided, otherwise calculate from current time + 15 min
+        expiresAtRef.current = cfg.expiresAt || (Date.now() + 900000)
+        const expiry = Math.floor((expiresAtRef.current - Date.now()) / 1000)
+        log('Client initialized (token expires in %ds)', expiry)
+        
         setLoading(false)
       })
       .catch((err) => {
