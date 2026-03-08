@@ -8,10 +8,8 @@ import debug from 'debug'
 const log = debug('location-client-react:provider')
 
 interface LocationClientContextValue {
-  config: ClientConfig | null
   client: GeoPlacesClient | null
   getToken: () => string | undefined
-  ensureValidToken: () => Promise<void>
   loading: boolean
   error: string | null
 }
@@ -21,102 +19,105 @@ const LocationClientContext = createContext<LocationClientContextValue | undefin
 export interface LocationClientProviderProps {
   children: ReactNode
   getConfig: () => Promise<ClientConfig & { expiresAt?: number }>
-  refreshBuffer?: number // Seconds before expiry to check (default: 60)
+  /** Seconds before expiry to proactively refresh (default: 60) */
+  refreshBuffer?: number
 }
 
 export function LocationClientProvider({ children, getConfig, refreshBuffer = 60 }: LocationClientProviderProps) {
-  const [config, setConfig] = useState<ClientConfig | null>(null)
   const [client, setClient] = useState<GeoPlacesClient | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  // Refs hold live values without triggering re-renders
   const tokenRef = useRef<string | undefined>(undefined)
   const expiresAtRef = useRef<number | null>(null)
   const getConfigRef = useRef(getConfig)
-  const tokenGenerationCount = useRef(0)
+  const refreshPromiseRef = useRef<Promise<void> | null>(null)
+  const ensureValidTokenRef = useRef<() => Promise<void>>(async () => {})
 
-  // Update ref when getConfig changes
+  // Keep getConfig ref current without recreating callbacks
   useEffect(() => {
     getConfigRef.current = getConfig
   }, [getConfig])
 
-  // Token getter function (stable reference)
-  const getToken = useCallback(() => tokenRef.current, [])
+  // Stable token getter — passed into GeoPlacesClient so it always reads the live ref
+  const getToken = useCallback((): string | undefined => tokenRef.current, [])
 
-  // Check if token is expired or about to expire
-  const isTokenExpired = useCallback(() => {
-    if (!expiresAtRef.current) return false
+  // Returns true when the token is expired or within the refresh buffer window.
+  // Treats unknown expiry as expired so we always refresh on first use.
+  const isTokenExpired = useCallback((): boolean => {
+    if (!expiresAtRef.current) return true
     return Date.now() >= (expiresAtRef.current - refreshBuffer * 1000)
   }, [refreshBuffer])
 
-  // Refresh token if needed
-  const ensureValidToken = useCallback(async () => {
+  // Refreshes the token exactly once even when called concurrently.
+  // All concurrent callers await the same in-flight promise — same pattern as
+  // server-side TokenProvider.tokenPromise deduplication.
+  const ensureValidToken = useCallback(async (): Promise<void> => {
     if (!isTokenExpired()) return
 
-    const timeUntilExpiry = expiresAtRef.current ? Math.floor((expiresAtRef.current - Date.now()) / 1000) : 0
-    log('Token expired or expiring soon (expires in %ds), refreshing...', timeUntilExpiry)
+    // Deduplicate: if a refresh is already in flight, wait for it instead of firing another
+    if (refreshPromiseRef.current) {
+      log('Token refresh already in progress, waiting...')
+      return refreshPromiseRef.current
+    }
 
-    tokenGenerationCount.current++
+    const timeUntilExpiry = expiresAtRef.current
+      ? Math.floor((expiresAtRef.current - Date.now()) / 1000)
+      : 0
+    log('Token expired or expiring soon (in %ds), refreshing...', timeUntilExpiry)
+
+    refreshPromiseRef.current = (async () => {
+      const cfg = await getConfigRef.current()
+      tokenRef.current = cfg.token
+      expiresAtRef.current = cfg.expiresAt ?? (Date.now() + 900_000)
+      const newExpiry = Math.floor((expiresAtRef.current - Date.now()) / 1000)
+      log('Token refreshed (expires in %ds)', newExpiry)
+    })()
 
     try {
-      const cfg = await getConfigRef.current()
-      setConfig(cfg)
-      tokenRef.current = cfg.token
-      
-      // Use expiresAt from config if provided, otherwise calculate from current time + 15 min
-      expiresAtRef.current = cfg.expiresAt || (Date.now() + 900000)
-      
-      const baseClient = new GeoPlacesClient(cfg)
-      const wrappedClient = new Proxy(baseClient, {
-        get(target, prop) {
-          if (prop === 'send') {
-            return async (command: any) => {
-              await ensureValidToken()
-              return target.send(command)
-            }
-          }
-          return (target as any)[prop]
-        }
-      }) as GeoPlacesClient
-      
-      setClient(wrappedClient)
-      
-      const newExpiry = Math.floor((expiresAtRef.current - Date.now()) / 1000)
-      log('Token refreshed successfully (new token expires in %ds)', newExpiry)
+      await refreshPromiseRef.current
     } catch (err) {
       log('Token refresh failed: %s', err instanceof Error ? err.message : 'Unknown error')
       setError(err instanceof Error ? err.message : 'Failed to refresh token')
+    } finally {
+      refreshPromiseRef.current = null
     }
   }, [isTokenExpired])
 
-  // Initial load
+  // Keep ensureValidToken ref current so the send wrapper always uses the latest version
+  useEffect(() => {
+    ensureValidTokenRef.current = ensureValidToken
+  }, [ensureValidToken])
+
+  // Initial load — create the client once.
+  // getToken is passed as a callback so the client always reads the live token ref.
+  // ensureValidToken is called before each send so expiring tokens are refreshed
+  // transparently without recreating the client or causing re-renders.
   useEffect(() => {
     log('Initializing LocationClientProvider')
-    tokenGenerationCount.current++
-    getConfig()
+
+    getConfigRef.current()
       .then((cfg) => {
-        setConfig(cfg)
         tokenRef.current = cfg.token
-        
-        const baseClient = new GeoPlacesClient(cfg)
-        const wrappedClient = new Proxy(baseClient, {
-          get(target, prop) {
-            if (prop === 'send') {
-              return async (command: any) => {
-                await ensureValidToken()
-                return target.send(command)
-              }
-            }
-            return (target as any)[prop]
-          }
-        }) as GeoPlacesClient
-        
-        setClient(wrappedClient)
-        
-        // Use expiresAt from config if provided, otherwise calculate from current time + 15 min
-        expiresAtRef.current = cfg.expiresAt || (Date.now() + 900000)
+        expiresAtRef.current = cfg.expiresAt ?? (Date.now() + 900_000)
+
+        // GeoPlacesClient.send() calls getToken() synchronously for the token value,
+        // but token refresh is async. We create a thin send wrapper that:
+        // 1. awaits ensureValidToken (via ref — always latest, race-safe)
+        // 2. delegates to baseClient which reads the now-fresh token from getToken()
+        // The client instance is created once and never recreated on token refresh.
+        const baseClient = new GeoPlacesClient({ apiUrl: cfg.apiUrl, token: cfg.token, getToken })
+        const wrappingClient = Object.create(baseClient) as GeoPlacesClient
+        wrappingClient.send = async (command: any) => {
+          await ensureValidTokenRef.current()
+          return baseClient.send(command)
+        }
+
+        setClient(wrappingClient)
+
         const expiry = Math.floor((expiresAtRef.current - Date.now()) / 1000)
         log('Client initialized (token expires in %ds)', expiry)
-        
         setLoading(false)
       })
       .catch((err) => {
@@ -124,17 +125,10 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
         setError(err instanceof Error ? err.message : 'Failed to initialize client')
         setLoading(false)
       })
-  }, [ensureValidToken])
-
-  // Check token validity on every state change
-  useEffect(() => {
-    if (!loading && config) {
-      ensureValidToken()
-    }
-  }, [config, loading, ensureValidToken])
+  }, [getToken])
 
   return (
-    <LocationClientContext.Provider value={{ config, client, getToken, ensureValidToken, loading, error }}>
+    <LocationClientContext.Provider value={{ client, getToken, loading, error }}>
       {children}
     </LocationClientContext.Provider>
   )
