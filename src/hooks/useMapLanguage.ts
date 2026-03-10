@@ -8,7 +8,7 @@ import { applyMapLanguage } from '@chaosity/location-client'
  * Using a structural type avoids maplibre-gl version conflicts between packages.
  */
 interface MapLike {
-  isStyleLoaded(): boolean
+  isStyleLoaded(): boolean | void
   on(event: string, listener: (...args: unknown[]) => void): void
   off(event: string, listener: (...args: unknown[]) => void): void
 }
