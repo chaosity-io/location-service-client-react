@@ -10,7 +10,8 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepare": "husky"
   },
   "keywords": [
     "react",
@@ -48,6 +49,7 @@
     "@types/debug": "^4.1.12",
     "@types/react": "^19.0.0",
     "happy-dom": "^17.0.0",
+    "husky": "^9.0.0",
     "maplibre-gl": "^5.0.0",
     "react": "^19.0.0",
     "typescript": "^5.0.0",

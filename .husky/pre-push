@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -e
+echo "pre-push: clean build check"
+rm -rf dist
+npm ci
+npm run build
