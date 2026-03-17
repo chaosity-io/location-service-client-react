@@ -1,7 +1,5 @@
 #!/usr/bin/env sh
 set -e
-echo "pre-push: install, test, build"
-rm -rf dist
 npm ci
 npm test
 npm run build
