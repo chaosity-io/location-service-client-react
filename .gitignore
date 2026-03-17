@@ -18,8 +18,6 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Lock files (libraries should not commit lock files)
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
 

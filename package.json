@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "prepublishOnly": "npm run build",
     "prepare": "husky"
@@ -31,7 +31,7 @@
     "url": "https://github.com/chaosity-io/location-service-client-react/issues"
   },
   "dependencies": {
-    "@chaosity/location-client": "file:../location-service-client",
+    "@chaosity/location-client": "^0.1.0",
     "debug": "^4.4.3"
   },
   "peerDependencies": {

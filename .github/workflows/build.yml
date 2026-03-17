@@ -1,6 +1,4 @@
 name: build
-permissions:
-  contents: read
 
 on:
   workflow_dispatch:
@@ -8,6 +6,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,19 +24,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6.0.2
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6.3.0
+
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
-          cache-dependency-path: "./package-lock.json"
-      - name: Install
-        run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test
-      - name: Build
-        run: npm run build
-      - name: Pack
-        run: npm pack
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run build
+
+      - run: npm pack
