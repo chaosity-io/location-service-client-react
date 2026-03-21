@@ -50,14 +50,14 @@ export default function RootLayout({
 
 ```tsx
 import { useLocationClient } from '@chaosity/location-client-react'
-import { SuggestCommand } from '@chaosity/location-client'
+import { SuggestCommand, type SuggestCommandOutput } from '@chaosity/location-client'
 
 function SearchComponent() {
   const { client, loading, error } = useLocationClient()
 
   const searchPlaces = async (query: string) => {
     if (!client) return
-    const response = await client.send(
+    const response: SuggestCommandOutput = await client.send(
       new SuggestCommand({ QueryText: query, MaxResults: 5 }),
     )
     return response.ResultItems
@@ -261,6 +261,7 @@ All AWS Location Service commands are available through the client:
 ```tsx
 import {
   SuggestCommand,
+  type SuggestCommandOutput,
   GeocodeCommand,
   ReverseGeocodeCommand,
   GetPlaceCommand,
@@ -272,7 +273,7 @@ function MyComponent() {
   const { client } = useLocationClient()
 
   const search = async () => {
-    const response = await client!.send(
+    const response: SuggestCommandOutput = await client!.send(
       new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 }),
     )
     return response.ResultItems
@@ -293,7 +294,7 @@ DEBUG=location-client-react:* npm run dev
 Full TypeScript support with types from AWS SDK:
 
 ```tsx
-import type { SuggestCommandOutput } from '@aws-sdk/client-geo-places'
+import { SuggestCommand, type SuggestCommandOutput } from '@chaosity/location-client'
 
 const { client } = useLocationClient()
 const response: SuggestCommandOutput = await client!.send(
