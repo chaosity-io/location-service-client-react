@@ -136,6 +136,7 @@ export function LocationClientProvider({
         const wrappingClient = Object.create(baseClient) as GeoPlacesClient
         wrappingClient.send = (async (command: unknown) => {
           await ensureValidTokenRef.current()
+          // @ts-ignore — generic <TInput, TOutput> can't be redeclared in a lambda; cast on next line handles it
           return baseClient.send(command)
         }) as typeof baseClient.send
 
