@@ -20,7 +20,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: ["22.x", "22.x"]
+        node-version: ['22.x', '24.x']
 
     steps:
       - uses: actions/checkout@v6.0.2
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v6.3.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: "npm"
+          cache: 'npm'
 
       - run: npm ci
 

@@ -1,9 +1,17 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react'
-import type { ReactNode } from 'react'
-import { GeoPlacesClient, ClientConfig } from '@chaosity/location-client'
+import type { ClientConfig, GeoPlacesCommand } from '@chaosity/location-client'
+import { GeoPlacesClient } from '@chaosity/location-client'
 import debug from 'debug'
+import type { ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 const log = debug('location-client-react:provider')
 
@@ -14,7 +22,9 @@ interface LocationClientContextValue {
   error: string | null
 }
 
-const LocationClientContext = createContext<LocationClientContextValue | undefined>(undefined)
+const LocationClientContext = createContext<
+  LocationClientContextValue | undefined
+>(undefined)
 
 export interface LocationClientProviderProps {
   children: ReactNode
@@ -23,7 +33,11 @@ export interface LocationClientProviderProps {
   refreshBuffer?: number
 }
 
-export function LocationClientProvider({ children, getConfig, refreshBuffer = 60 }: LocationClientProviderProps) {
+export function LocationClientProvider({
+  children,
+  getConfig,
+  refreshBuffer = 60,
+}: LocationClientProviderProps) {
   const [client, setClient] = useState<GeoPlacesClient | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +61,7 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
   // Treats unknown expiry as expired so we always refresh on first use.
   const isTokenExpired = useCallback((): boolean => {
     if (!expiresAtRef.current) return true
-    return Date.now() >= (expiresAtRef.current - refreshBuffer * 1000)
+    return Date.now() >= expiresAtRef.current - refreshBuffer * 1000
   }, [refreshBuffer])
 
   // Refreshes the token exactly once even when called concurrently.
@@ -65,12 +79,15 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
     const timeUntilExpiry = expiresAtRef.current
       ? Math.floor((expiresAtRef.current - Date.now()) / 1000)
       : 0
-    log('Token expired or expiring soon (in %ds), refreshing...', timeUntilExpiry)
+    log(
+      'Token expired or expiring soon (in %ds), refreshing...',
+      timeUntilExpiry,
+    )
 
     refreshPromiseRef.current = (async () => {
       const cfg = await getConfigRef.current()
       tokenRef.current = cfg.token
-      expiresAtRef.current = cfg.expiresAt ?? (Date.now() + 900_000)
+      expiresAtRef.current = cfg.expiresAt ?? Date.now() + 900_000
       const newExpiry = Math.floor((expiresAtRef.current - Date.now()) / 1000)
       log('Token refreshed (expires in %ds)', newExpiry)
     })()
@@ -78,7 +95,10 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
     try {
       await refreshPromiseRef.current
     } catch (err) {
-      log('Token refresh failed: %s', err instanceof Error ? err.message : 'Unknown error')
+      log(
+        'Token refresh failed: %s',
+        err instanceof Error ? err.message : 'Unknown error',
+      )
       setError(err instanceof Error ? err.message : 'Failed to refresh token')
     } finally {
       refreshPromiseRef.current = null
@@ -97,19 +117,24 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
   useEffect(() => {
     log('Initializing LocationClientProvider')
 
-    getConfigRef.current()
+    getConfigRef
+      .current()
       .then((cfg) => {
         tokenRef.current = cfg.token
-        expiresAtRef.current = cfg.expiresAt ?? (Date.now() + 900_000)
+        expiresAtRef.current = cfg.expiresAt ?? Date.now() + 900_000
 
         // GeoPlacesClient.send() calls getToken() synchronously for the token value,
         // but token refresh is async. We create a thin send wrapper that:
         // 1. awaits ensureValidToken (via ref — always latest, race-safe)
         // 2. delegates to baseClient which reads the now-fresh token from getToken()
         // The client instance is created once and never recreated on token refresh.
-        const baseClient = new GeoPlacesClient({ apiUrl: cfg.apiUrl, token: cfg.token, getToken })
+        const baseClient = new GeoPlacesClient({
+          apiUrl: cfg.apiUrl,
+          token: cfg.token,
+          getToken,
+        })
         const wrappingClient = Object.create(baseClient) as GeoPlacesClient
-        wrappingClient.send = async (command: any) => {
+        wrappingClient.send = async (command: GeoPlacesCommand) => {
           await ensureValidTokenRef.current()
           return baseClient.send(command)
         }
@@ -121,14 +146,21 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
         setLoading(false)
       })
       .catch((err) => {
-        log('Initialization failed: %s', err instanceof Error ? err.message : 'Unknown error')
-        setError(err instanceof Error ? err.message : 'Failed to initialize client')
+        log(
+          'Initialization failed: %s',
+          err instanceof Error ? err.message : 'Unknown error',
+        )
+        setError(
+          err instanceof Error ? err.message : 'Failed to initialize client',
+        )
         setLoading(false)
       })
   }, [getToken])
 
   return (
-    <LocationClientContext.Provider value={{ client, getToken, loading, error }}>
+    <LocationClientContext.Provider
+      value={{ client, getToken, loading, error }}
+    >
       {children}
     </LocationClientContext.Provider>
   )
@@ -137,7 +169,9 @@ export function LocationClientProvider({ children, getConfig, refreshBuffer = 60
 export function useLocationClient() {
   const context = useContext(LocationClientContext)
   if (context === undefined) {
-    throw new Error('useLocationClient must be used within LocationClientProvider')
+    throw new Error(
+      'useLocationClient must be used within LocationClientProvider',
+    )
   }
   return context
 }

@@ -1,17 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import type { MapLike } from '@chaosity/location-client'
 import { applyMapLanguage } from '@chaosity/location-client'
-
-/**
- * Minimal interface describing the MapLibre Map methods used by this hook.
- * Using a structural type avoids maplibre-gl version conflicts between packages.
- */
-interface MapLike {
-  isStyleLoaded(): boolean | void
-  on(event: string, listener: (...args: unknown[]) => void): void
-  off(event: string, listener: (...args: unknown[]) => void): void
-}
+import { useEffect } from 'react'
 
 /**
  * React hook that keeps map label language in sync with the `language` prop.
@@ -31,8 +22,7 @@ export function useMapLanguage(map: MapLike | null, language: string): void {
   useEffect(() => {
     if (!map) return
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const applyFn = () => applyMapLanguage(map as any, language)
+    const applyFn = () => applyMapLanguage(map, language)
 
     if (map.isStyleLoaded()) {
       applyFn()

@@ -33,7 +33,11 @@ export async function getLocationConfig() {
 import { LocationClientProvider } from '@chaosity/location-client-react'
 import { getLocationConfig } from './actions/location'
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
     <LocationClientProvider getConfig={getLocationConfig}>
       {children}
@@ -54,7 +58,7 @@ function SearchComponent() {
   const searchPlaces = async (query: string) => {
     if (!client) return
     const response = await client.send(
-      new SuggestCommand({ QueryText: query, MaxResults: 5 })
+      new SuggestCommand({ QueryText: query, MaxResults: 5 }),
     )
     return response.ResultItems
   }
@@ -83,7 +87,9 @@ function MapComponent() {
   useMapLanguage(mapInstance, language)
 
   useEffect(() => {
-    const map = new maplibregl.Map({ /* ... */ })
+    const map = new maplibregl.Map({
+      /* ... */
+    })
     map.once('load', () => setMapInstance(map))
     return () => map.remove()
   }, [])
@@ -109,15 +115,13 @@ function MapComponent() {
 Provides the location client and automatic token refresh to all child components.
 
 ```tsx
-<LocationClientProvider
-  getConfig={getLocationConfig}
-  refreshBuffer={60}
->
+<LocationClientProvider getConfig={getLocationConfig} refreshBuffer={60}>
   {children}
 </LocationClientProvider>
 ```
 
 **Props:**
+
 - `getConfig` — Async function that returns `{ apiUrl: string, token: string, expiresAt?: number }`. Called on init and whenever the token needs refreshing.
 - `refreshBuffer` (optional, default: `60`) — Seconds before token expiry to proactively refresh. Prevents mid-request expiration.
 - `children` — Child components.
@@ -131,6 +135,7 @@ const { client, getToken, loading, error } = useLocationClient()
 ```
 
 **Returns:**
+
 - `client` (`GeoPlacesClient | null`) — The location client instance. Automatically refreshes the token before each `send()` call if needed.
 - `getToken` (`() => string | undefined`) — Returns the current token. Useful for direct API calls (e.g., map style fetch).
 - `loading` (`boolean`) — Whether the client is initializing.
@@ -155,7 +160,10 @@ No manual token management needed. The `client` always uses a valid token.
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useLocationClient, useMapLanguage } from '@chaosity/location-client-react'
+import {
+  useLocationClient,
+  useMapLanguage,
+} from '@chaosity/location-client-react'
 import {
   GeoPlaces,
   fetchMapStyle,
@@ -178,7 +186,6 @@ export default function MapComponent() {
 
   useEffect(() => {
     if (!mapContainer.current || map.current || loading || !client) return
-
     ;(async () => {
       // Fetch style with terrain, 3D buildings, and language baked into the descriptor
       const style = await fetchMapStyle(API_URL, 'Standard', getToken, {
@@ -197,8 +204,14 @@ export default function MapComponent() {
         transformRequest: createTransformRequest(API_URL, getToken),
       })
 
-      instance.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
-      instance.addControl(new maplibregl.TerrainControl({ source: 'amazon' }), 'top-right')
+      instance.addControl(
+        new maplibregl.NavigationControl({ visualizePitch: true }),
+        'top-right',
+      )
+      instance.addControl(
+        new maplibregl.TerrainControl({ source: 'amazon' }),
+        'top-right',
+      )
 
       const geoPlaces = new GeoPlaces(client, instance)
       const geocoder = new MaplibreGeocoder(geoPlaces, {
@@ -237,6 +250,7 @@ useMapLanguage(map: MapLike | null, language: string): void
 ```
 
 **Parameters:**
+
 - `map` — MapLibre Map instance, or `null` while the map is initializing.
 - `language` — ISO 639-1 language code (e.g. `'en'`, `'fr'`, `'de'`, `'ja'`, `'zh'`, `'ar'`).
 
@@ -259,7 +273,7 @@ function MyComponent() {
 
   const search = async () => {
     const response = await client!.send(
-      new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 })
+      new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 }),
     )
     return response.ResultItems
   }
@@ -283,7 +297,7 @@ import type { SuggestCommandOutput } from '@aws-sdk/client-geo-places'
 
 const { client } = useLocationClient()
 const response: SuggestCommandOutput = await client!.send(
-  new SuggestCommand({ QueryText: 'Vancouver' })
+  new SuggestCommand({ QueryText: 'Vancouver' }),
 )
 ```
 
