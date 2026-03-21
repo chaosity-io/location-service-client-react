@@ -34,7 +34,7 @@
     "url": "https://github.com/chaosity-io/location-service-client-react/issues"
   },
   "dependencies": {
-    "@chaosity/location-client": "^0.1.0",
+    "@chaosity/location-client": "^0.1.14",
     "debug": "^4.4.3"
   },
   "peerDependencies": {

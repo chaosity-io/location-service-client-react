@@ -1,6 +1,6 @@
 'use client'
 
-import type { ClientConfig, GeoPlacesCommand } from '@chaosity/location-client'
+import type { ClientConfig } from '@chaosity/location-client'
 import { GeoPlacesClient } from '@chaosity/location-client'
 import debug from 'debug'
 import type { ReactNode } from 'react'
@@ -134,10 +134,10 @@ export function LocationClientProvider({
           getToken,
         })
         const wrappingClient = Object.create(baseClient) as GeoPlacesClient
-        wrappingClient.send = async (command: GeoPlacesCommand) => {
+        wrappingClient.send = (async (command: unknown) => {
           await ensureValidTokenRef.current()
           return baseClient.send(command)
-        }
+        }) as typeof baseClient.send
 
         setClient(wrappingClient)
 
