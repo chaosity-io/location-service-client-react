@@ -1,5 +1,15 @@
 #!/usr/bin/env sh
 set -e
-npm ci
+
+# Lockfile drift is the one thing local commands miss: `npm install` tolerates a
+# package.json that has drifted from the lock, `npm ci` does not — and
+# publish.yml runs `npm ci`. So drift stays invisible until it breaks a release.
+#
+# --dry-run resolves and validates WITHOUT installing: well under a second, and
+# it leaves node_modules untouched. The previous hook ran a full `npm ci`, which
+# wiped and reinstalled the tree on every push.
+npm ci --dry-run
+
+npm run lint
 npm test
 npm run build

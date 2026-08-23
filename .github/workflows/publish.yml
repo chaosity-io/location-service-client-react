@@ -1,9 +1,26 @@
 name: publish
 
+# Publishes when the version in package.json changes on main.
+#
+# Triggered by build.yml COMPLETING, not by the push itself, so a publish can
+# never overtake its own validation. The two used to be fired by the same push
+# and ran in parallel, which meant a failing build did not stop a release —
+# and a release cannot be taken back, npm's unpublish being time-limited and
+# conditional.
+#
+# Because workflow_run carries no `paths` filter, the "has this version already
+# been published?" check below is what decides. Without it every successful
+# build on main would attempt a publish and fail red on the ~95% of commits that
+# are not releases.
+#
+# The tag is not the trigger either: `npm version` creates it on the release
+# branch, before review, so triggering on it would publish unmerged code.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,9 +28,17 @@ permissions:
 
 jobs:
   publish:
+    # Only when the build that triggered this actually passed. workflow_run fires
+    # on completion, success or not.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
+      # workflow_run checks out the DEFAULT BRANCH TIP by default, not the commit
+      # that was built. Pinning head_sha keeps this release tied to the exact code
+      # build.yml just validated.
       - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v6.3.0
         with:
@@ -21,8 +46,25 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
-      - run: npm ci
+      - name: Has this version already been published?
+        id: check
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@chaosity/location-client-react@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::@chaosity/location-client-react@$VERSION is already on npm — nothing to release."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::@chaosity/location-client-react@$VERSION is not on npm — releasing."
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - run: npm test
+      # No lint, test or build here: build.yml ran all of them, on this exact
+      # commit, and this workflow only runs because it passed.
+      - if: steps.check.outputs.needed == 'true'
+        run: npm ci
 
-      - run: npm publish --access public --provenance
+      # `prepublishOnly` runs `npm run build`, so the tarball is built here
+      # whether or not a step says so. --provenance signs it against this run via
+      # OIDC; no long-lived credential is involved.
+      - if: steps.check.outputs.needed == 'true'
+        run: npm publish --access public --provenance
