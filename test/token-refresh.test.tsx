@@ -18,6 +18,17 @@ import {
  */
 
 vi.mock('@chaosity/location-client', () => ({
+  TOKEN_REFRESH_BUFFER_SECONDS: 60,
+  // Mirrors the real implementation: read `exp` out of the JWT.
+  readTokenExpiry: (token?: string) => {
+    if (!token) return undefined
+    try {
+      const exp = JSON.parse(atob(token.split('.')[1])).exp
+      return typeof exp === 'number' ? exp * 1000 : undefined
+    } catch {
+      return undefined
+    }
+  },
   GeoPlacesClient: class {
     config = { serviceId: 'Geo Places' }
     constructor(public cfg: { getToken?: () => string | undefined }) {}
@@ -65,9 +76,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const renderProvider = (buffer = 60) =>
+const renderProvider = () =>
   render(
-    <LocationClientProvider getConfig={getConfig} refreshBuffer={buffer}>
+    <LocationClientProvider getConfig={getConfig}>
       <TokenProbe />
     </LocationClientProvider>,
   )
@@ -174,5 +185,56 @@ describe('single-flight', () => {
 
     await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(2))
     expect(getConfig).not.toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('it cannot out-run the server (the 0.2.0 spin)', () => {
+  /**
+   * 0.2.0 shipped with a settable `refreshBuffer`. A consumer passing 800s
+   * against a 900s token judged it stale after 100s — but `getClientConfig` on
+   * the server only re-mints within 60s of expiry, so it returned the SAME
+   * token, which the client judged stale again, immediately. Roughly 110
+   * requests per second from an idle page, observed 2026-08-23.
+   *
+   * The prop is gone and both sides now apply TOKEN_REFRESH_BUFFER_SECONDS to
+   * the token's own `exp`, so they cannot reach different answers.
+   */
+  it('does not re-ask when the server returns the same still-valid token', async () => {
+    const exp = Math.floor(Date.now() / 1000) + 900
+    const token = `h.${btoa(JSON.stringify({ exp }))}.s`
+    // Always the same token, as a warm server-side cache would return.
+    getConfig = vi.fn(async () => ({ apiUrl: 'https://api.test', token }))
+
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      for (let i = 0; i < 50; i++) readToken()
+      await vi.advanceTimersByTimeAsync(120_000)
+    })
+
+    expect(getConfig).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes the expiry from the token, not from what getConfig claims', async () => {
+    // A wildly wrong expiresAt must not matter: `exp` wins. Against the old
+    // provider this test hangs, because it spun on the bogus value.
+    const exp = Math.floor(Date.now() / 1000) + 900
+    const token = `h.${btoa(JSON.stringify({ exp }))}.s`
+    getConfig = vi.fn(async () => ({
+      apiUrl: 'https://api.test',
+      token,
+      expiresAt: Date.now() - 60_000,
+    }))
+
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      for (let i = 0; i < 20; i++) readToken()
+      await vi.advanceTimersByTimeAsync(60_000)
+    })
+
+    expect(getConfig).toHaveBeenCalledTimes(1)
   })
 })
