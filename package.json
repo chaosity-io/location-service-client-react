@@ -1,6 +1,6 @@
 {
   "name": "@chaosity/location-client-react",
-  "version": "0.1.19",
+  "version": "0.2.0",
   "description": "React bindings for Chaosity Location Service client",
   "type": "module",
   "main": "dist/index.js",
