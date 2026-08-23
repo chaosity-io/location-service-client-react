@@ -1,6 +1,29 @@
 #!/usr/bin/env sh
 set -e
-rm -rf package-lock.json dist/ node_modules/
-npm install
-git add package-lock.json
-npm run build
+
+# This used to be:
+#
+#     rm -rf package-lock.json dist/ node_modules/
+#     npm install
+#     git add package-lock.json
+#
+# which deleted the lockfile on EVERY commit, re-resolved every range to
+# whatever the registry served that minute, and auto-staged the result. So each
+# commit silently carried dependency changes nobody reviewed, reproducible
+# builds were impossible, and a freshly published malicious version would have
+# been pulled in and committed without anyone looking. It also took minutes.
+#
+# A lockfile changes when someone changes it deliberately. Nothing here touches
+# dependencies.
+
+# A leak must never reach a commit object, and this is cheap enough to run every time.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --no-banner --redact
+else
+  echo "⚠ gitleaks not installed — https://github.com/gitleaks/gitleaks#getting-started"
+  echo "⚠ Skipping secret scan."
+fi
+
+# ~2s across the whole package. Small enough that staged-file filtering
+# (lint-staged) would be more moving parts than it saves.
+npm run lint

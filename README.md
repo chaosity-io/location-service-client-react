@@ -50,7 +50,10 @@ export default function RootLayout({
 
 ```tsx
 import { useLocationClient } from '@chaosity/location-client-react'
-import { SuggestCommand, type SuggestCommandOutput } from '@chaosity/location-client'
+import {
+  SuggestCommand,
+  type SuggestCommandOutput,
+} from '@chaosity/location-client'
 
 function SearchComponent() {
   const { client, loading, error } = useLocationClient()
@@ -87,9 +90,7 @@ function MapComponent() {
   useMapLanguage(mapInstance, language)
 
   useEffect(() => {
-    const map = new maplibregl.Map({
-      /* ... */
-    })
+    const map = new maplibregl.Map({/* ... */})
     map.once('load', () => setMapInstance(map))
     return () => map.remove()
   }, [])
@@ -294,7 +295,10 @@ DEBUG=location-client-react:* npm run dev
 Full TypeScript support with types from AWS SDK:
 
 ```tsx
-import { SuggestCommand, type SuggestCommandOutput } from '@chaosity/location-client'
+import {
+  SuggestCommand,
+  type SuggestCommandOutput,
+} from '@chaosity/location-client'
 
 const { client } = useLocationClient()
 const response: SuggestCommandOutput = await client!.send(
