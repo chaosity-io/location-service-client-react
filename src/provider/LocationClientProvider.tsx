@@ -1,7 +1,11 @@
 'use client'
 
 import type { ClientConfig } from '@chaosity/location-client'
-import { GeoPlacesClient } from '@chaosity/location-client'
+import {
+  GeoPlacesClient,
+  TOKEN_REFRESH_BUFFER_SECONDS,
+  readTokenExpiry,
+} from '@chaosity/location-client'
 import debug from 'debug'
 import type { ReactNode } from 'react'
 import {
@@ -57,16 +61,29 @@ const LocationClientContext = createContext<
 export interface LocationClientProviderProps {
   children: ReactNode
   getConfig: () => Promise<ClientConfig & { expiresAt?: number }>
-  /** Seconds before expiry to proactively refresh (default: 60) */
-  refreshBuffer?: number
 }
 
 const DEFAULT_LIFETIME_MS = 900_000
 
+/**
+ * When this token needs replacing.
+ *
+ * The `exp` claim first — it is the only value that cannot disagree with what
+ * the API will accept, and the server-side TokenProvider reads the same one.
+ * `expiresAt` is whatever `getConfig` chose to report, and the final fallback
+ * is a guess used only when the token cannot be parsed at all.
+ */
+function expiryOf(cfg: ClientConfig & { expiresAt?: number }): number {
+  return (
+    readTokenExpiry(cfg.token) ??
+    cfg.expiresAt ??
+    Date.now() + DEFAULT_LIFETIME_MS
+  )
+}
+
 export function LocationClientProvider({
   children,
   getConfig,
-  refreshBuffer = 60,
 }: LocationClientProviderProps) {
   const [client, setClient] = useState<LocationClient | null>(null)
   const [loading, setLoading] = useState(true)
@@ -85,8 +102,10 @@ export function LocationClientProvider({
 
   const isTokenExpired = useCallback((): boolean => {
     if (!expiresAtRef.current) return true
-    return Date.now() >= expiresAtRef.current - refreshBuffer * 1000
-  }, [refreshBuffer])
+    return (
+      Date.now() >= expiresAtRef.current - TOKEN_REFRESH_BUFFER_SECONDS * 1000
+    )
+  }, [])
 
   /**
    * Refresh once, however many callers ask at the same moment.
@@ -102,7 +121,7 @@ export function LocationClientProvider({
     refreshPromiseRef.current = (async () => {
       const cfg = await getConfigRef.current()
       tokenRef.current = cfg.token
-      expiresAtRef.current = cfg.expiresAt ?? Date.now() + DEFAULT_LIFETIME_MS
+      expiresAtRef.current = expiryOf(cfg)
       log(
         'Token refreshed (expires in %ds)',
         Math.floor((expiresAtRef.current - Date.now()) / 1000),
@@ -140,7 +159,7 @@ export function LocationClientProvider({
 
     const delay = Math.max(
       0,
-      expiresAtRef.current - refreshBuffer * 1000 - Date.now(),
+      expiresAtRef.current - TOKEN_REFRESH_BUFFER_SECONDS * 1000 - Date.now(),
     )
     log('Next refresh in %ds', Math.floor(delay / 1000))
     timerRef.current = setTimeout(() => {
@@ -148,7 +167,7 @@ export function LocationClientProvider({
       // a failed background refresh cannot become an unhandled rejection.
       void refreshToken().catch(() => {})
     }, delay)
-  }, [refreshBuffer, refreshToken])
+  }, [refreshToken])
 
   // refreshToken and scheduleRefresh reference each other; a ref breaks the cycle
   // without recreating either callback on every render.
@@ -215,7 +234,7 @@ export function LocationClientProvider({
       .then((cfg) => {
         if (!mountedRef.current) return
         tokenRef.current = cfg.token
-        expiresAtRef.current = cfg.expiresAt ?? Date.now() + DEFAULT_LIFETIME_MS
+        expiresAtRef.current = expiryOf(cfg)
 
         const baseClient = new GeoPlacesClient({
           apiUrl: cfg.apiUrl,
