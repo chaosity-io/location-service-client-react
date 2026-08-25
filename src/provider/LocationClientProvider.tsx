@@ -2,6 +2,7 @@
 
 import type { ClientConfig } from '@chaosity/location-client'
 import {
+  type AppConfigClaims,
   GeoPlacesClient,
   TOKEN_REFRESH_BUFFER_SECONDS,
   readTokenExpiry,
@@ -45,6 +46,24 @@ export interface LocationClient {
     command: TInput,
     options?: SendOptions,
   ): Promise<TOutput>
+  /**
+   * This application's own configuration, read from the access token —
+   * bias precision, and the countries it is scoped to (api#65).
+   *
+   * Here so a React app can SHOW its own settings: populate a country
+   * selector with the markets it serves, label a settings screen. Being a
+   * few minutes stale is cosmetic for that.
+   *
+   * It is not an entitlement check, and the `countries` value must not be
+   * used to shape requests. The token is a snapshot; the API reads the scope
+   * fresh from the application row on every call. Injecting a stale scope
+   * turns a request that would have succeeded into a 400. See
+   * `AppConfigClaims` in @chaosity/location-client for the measurement.
+   *
+   * Returns `{}` when the token carries no application config, which is the
+   * case until one is set in the portal.
+   */
+  getAppConfig(): AppConfigClaims
 }
 
 interface LocationClientContextValue {
@@ -259,6 +278,13 @@ export function LocationClientProvider({
                 o?: SendOptions,
               ) => Promise<TOutput>
             )(command, options)
+          },
+          // Reads whatever token the client currently holds. Deliberately not
+          // awaiting a refresh: this is display data, callers expect it to be
+          // synchronous, and a token that is minutes from expiry carries the
+          // same application config as its replacement will.
+          getAppConfig(): AppConfigClaims {
+            return baseClient.getAppConfig()
           },
         }
 
