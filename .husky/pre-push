@@ -13,3 +13,8 @@ npm ci --dry-run
 npm run lint
 npm test
 npm run build
+
+# Build output is not the same thing as a loadable package. 0.4.0 was green on
+# every line above and still threw ERR_MODULE_NOT_FOUND on `import` outside a
+# bundler (#16), because nothing here ever asked Node to resolve dist/ itself.
+npm run smoke

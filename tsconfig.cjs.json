@@ -1,0 +1,18 @@
+{
+  // The CommonJS half of the dual build (#16). `tsc` runs twice: the base config
+  // emits ESM into dist/, this one emits CJS into dist/cjs/, and
+  // scripts/finish-cjs.mjs drops a {"type":"commonjs"} package.json beside it so
+  // Node reads those .js files as CJS despite the root "type": "module".
+  //
+  // moduleResolution stays Node10 rather than NodeNext: NodeNext derives the
+  // module system from the nearest package.json, which at compile time is still
+  // the ESM root. Node10 also maps the './x.js' specifiers back to './x.ts', so
+  // the source keeps ONE set of extensioned specifiers for both outputs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node10",
+    "outDir": "./dist/cjs",
+    "declaration": true
+  }
+}
