@@ -1,11 +1,11 @@
 export {
   LocationClientProvider,
   useLocationClient,
-} from './provider/LocationClientProvider'
+} from './provider/LocationClientProvider.js'
 export type {
   LocationClient,
   LocationClientProviderProps,
   SendOptions,
-} from './provider/LocationClientProvider'
+} from './provider/LocationClientProvider.js'
 
-export { useMapLanguage } from './hooks/useMapLanguage'
+export { useMapLanguage } from './hooks/useMapLanguage.js'

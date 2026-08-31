@@ -12,9 +12,10 @@ else — commands, types, map helpers — comes from the core package.
 ## Commands
 
 ```bash
-npm run build       # tsc
+npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
 npm test            # vitest run — 24 tests across 4 files
+npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run test:watch  # vitest interactive
 npm run lint        # eslint . AND prettier --check .
 npm run lint:fix    # eslint --fix . && prettier --write .
@@ -26,8 +27,10 @@ fails the lint step. Use `lint:fix`, not bare `eslint --fix`.
 ### The push gate
 
 `.husky/pre-push` runs `npm ci --dry-run` (lockfile drift), `npm run lint`,
-`npm test`, then **`npm run build`** — so a push needs a clean compile, not just
-green tests. Type errors that vitest tolerates are stopped here.
+`npm test`, **`npm run build`**, then **`npm run smoke`** — so a push needs a
+clean compile and a package that actually loads, not just green tests. Type
+errors that vitest tolerates are stopped by the build; a package that compiles
+but cannot be `import`ed is stopped by the smoke step (see Conventions).
 
 ## The whole public surface
 
@@ -40,9 +43,10 @@ import {
 ```
 
 That is all of it — plus the `LocationClient`, `LocationClientProviderProps` and
-`SendOptions` types. There is no `exports` map and no subpath entry: a single
-`main`/`types` pair pointing at `dist/`. Adding a second entry point is a
-packaging decision, not a refactor.
+`SendOptions` types. There is **one** entry point. The `exports` map declares it
+twice, once per module system (`import` and `require`), which is not the same as
+a second entry point: adding a subpath is still a packaging decision, not a
+refactor.
 
 Keep it thin. Anything that is not React-specific belongs in the core package,
 where it can be used by consumers who are not on React.
@@ -89,8 +93,34 @@ on the consumer's server, not in this library.
 
 ## Conventions
 
-- **ESM only** (`"type": "module"`), compiled to `dist/` by `tsc`; `files` ships
-  `dist` and the README.
+- **Relative imports in `src/` must carry a `.js` extension**, even though the
+  source is `.ts`/`.tsx`: `import { x } from './provider/LocationClientProvider.js'`.
+  `tsconfig.json` is `moduleResolution: NodeNext`, which is what Node's own ESM
+  resolver requires — TypeScript maps the `.js` specifier back to the real file
+  for you. This used to be wrong: the package emitted extensionless specifiers,
+  so every `import` outside a bundler died with `ERR_MODULE_NOT_FOUND` (#16), and
+  it took `@chaosity/address-form` down with it. The rule applies to `src/` —
+  what `tsc` compiles and emits. Files in `test/` are outside `tsconfig.json`'s
+  `include`, are never emitted, and are resolved by vitest, so they stay
+  extensionless; leave them alone.
+- **Dual ESM/CJS** (`"type": "module"`). `npm run build` runs `tsc` twice: ESM
+  into `dist/`, CommonJS into `dist/cjs/`, and `scripts/finish-cjs.mjs` writes a
+  `{"type":"commonjs"}` package.json beside the second so Node reads it as CJS.
+  `files` ships `dist` and the README.
+- **One process must load one half, not both.** That is the standing cost of a
+  dual package, and it is sharper here than in the core: `require` and `import`
+  get separate module registries, so each half runs its own `createContext`. A
+  consumer whose provider resolves through one half and whose hook resolves
+  through the other gets a `useLocationClient` reading a context
+  `LocationClientProvider` never wrote — it throws the "must be used within a
+  provider" error while the provider is right there in the tree, so it reads as
+  the consumer's mistake rather than a packaging one. Pick a module system per
+  process and stay in it.
+- **`npm run smoke` is the test a build cannot replace.** It resolves `dist/`
+  through Node as ESM and as CJS, checks the surface is identical in both, and
+  re-asserts that no server-only core export has leaked into it. It runs in the
+  push gate, in CI, and in `prepublishOnly` — the last so it guards the exact
+  tarball that publishes.
 - Tests are vitest. React changes want a test that renders — a provider that
   compiles is not a provider that mounts.
 - Prettier runs with `prettier-plugin-organize-imports`, so import order is

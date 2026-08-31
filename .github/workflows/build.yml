@@ -40,4 +40,9 @@ jobs:
 
       - run: npm run build
 
+      # A green build is not a loadable package: 0.4.0 passed every step here
+      # and still threw ERR_MODULE_NOT_FOUND on `import` outside a bundler
+      # (#16). This resolves dist/ through Node itself, as ESM and as CJS.
+      - run: npm run smoke
+
       - run: npm pack

@@ -3,18 +3,19 @@
   "version": "0.4.0",
   "description": "React bindings for Chaosity Location Service client",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/cjs/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.cjs.json && node scripts/finish-cjs.mjs",
     "dev": "tsc --watch",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint --fix . && prettier --write .",
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build",
-    "prepare": "husky"
+    "prepublishOnly": "npm run build && npm run smoke",
+    "prepare": "husky",
+    "smoke": "node scripts/smoke.mjs"
   },
   "keywords": [
     "react",
@@ -47,7 +48,7 @@
     }
   },
   "devDependencies": {
-    "@chaosity/location-client": "^0.4.0",
+    "@chaosity/location-client": "^0.6.0",
     "@eslint/js": "^10.0.1",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.0.0",
@@ -71,5 +72,22 @@
   "files": [
     "dist",
     "README.md"
-  ]
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    }
+  },
+  "module": "dist/index.js",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  }
 }

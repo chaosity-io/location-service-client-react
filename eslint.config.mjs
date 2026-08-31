@@ -7,6 +7,22 @@ export default defineConfig(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Build/packaging scripts run in Node, not in the browser surface this
+    // library ships, so they get Node's globals and are allowed to talk to
+    // stdout — reporting is the whole job of scripts/smoke.mjs.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        URL: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     rules: {
       'prefer-const': 'warn',
