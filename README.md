@@ -116,7 +116,7 @@ function MapComponent() {
 Provides the location client and automatic token refresh to all child components.
 
 ```tsx
-<LocationClientProvider getConfig={getLocationConfig} refreshBuffer={60}>
+<LocationClientProvider getConfig={getLocationConfig}>
   {children}
 </LocationClientProvider>
 ```
@@ -124,8 +124,13 @@ Provides the location client and automatic token refresh to all child components
 **Props:**
 
 - `getConfig` — Async function that returns `{ apiUrl: string, token: string, expiresAt?: number }`. Called on init and whenever the token needs refreshing.
-- `refreshBuffer` (optional, default: `60`) — Seconds before token expiry to proactively refresh. Prevents mid-request expiration.
 - `children` — Child components.
+
+There is no `refreshBuffer` prop. It was removed in `0.3.0` — a value shorter
+than the server's own re-mint window made the client judge a token stale that
+the server would not yet replace, and the two spun against each other. Both
+sides now apply the same buffer to the token's own `exp`. Passing it does
+nothing.
 
 ### useLocationClient
 
@@ -137,7 +142,7 @@ const { client, getToken, loading, error } = useLocationClient()
 
 **Returns:**
 
-- `client` (`GeoPlacesClient | null`) — The location client instance. Automatically refreshes the token before each `send()` call if needed.
+- `client` (`LocationClient | null`) — The location client. Not a bare `GeoPlacesClient`: the provider wraps it so `send()` refreshes the token first when it needs to, and retries once if the API rejects it.
 - `getToken` (`() => string | undefined`) — Returns the current token. Useful for direct API calls (e.g., map style fetch).
 - `loading` (`boolean`) — Whether the client is initializing.
 - `error` (`string | null`) — Error message if initialization or token refresh failed.
@@ -146,14 +151,30 @@ const { client, getToken, loading, error } = useLocationClient()
 
 ## Token Refresh
 
-The provider automatically handles token lifecycle:
+The provider owns the token lifecycle. There is nothing to manage manually.
 
-1. Fetches an initial token via `getConfig` on mount
-2. Before each `client.send()` call, checks if the token is expired or within the `refreshBuffer` window
-3. If expired, calls `getConfig` again to get a fresh token
-4. Concurrent refresh requests are deduplicated — multiple `send()` calls wait for the same refresh
+1. `getConfig` is called on mount for the initial token.
+2. A timer refreshes **ahead of expiry**, 60 seconds before the token's own
+   `exp`. This is what keeps a map alive: MapLibre requests tiles, glyphs and
+   sprites directly, never through `send()`, so a refresh that happened only
+   inside `send()` would never fire for them.
+3. `send()` checks too, and refreshes first if the token is inside that window.
+4. Returning to a backgrounded tab refreshes immediately — a throttled tab's
+   timer can be arbitrarily late.
+5. If the API rejects a token **before** its `exp` — revoked from the portal, or
+   minted against a client secret since rotated — the 401 triggers a refresh and
+   the request is retried once with the new token. Nothing on this side has any
+   other reason to replace that token, so without this the failures continue
+   until the timer next comes around: for a token with 14 minutes left, 14
+   minutes of a broken page. Needs `@chaosity/location-client` 0.7.0 or later;
+   on older versions the other five steps still work.
+6. Concurrent refreshes are deduplicated — everything waiting shares one call to
+   `getConfig`.
 
-No manual token management needed. The `client` always uses a valid token.
+A refresh that fails is reported as `error` from `useLocationClient()`, and
+rejects the `send()` that triggered it — with the refresh error rather than a
+401, so the cause reads as the token endpoint being unreachable and not as the
+API refusing you.
 
 ## Complete Example with MapLibre
 

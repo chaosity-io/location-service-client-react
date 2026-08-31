@@ -259,6 +259,28 @@ export function LocationClientProvider({
           apiUrl: cfg.apiUrl,
           token: cfg.token,
           getToken,
+          /**
+           * The 401 escape hatch (#19).
+           *
+           * Covers what the timer cannot: a token revoked from the portal, or
+           * minted against a client secret since rotated, is refused by the API
+           * while still minutes from its own `exp` — so nothing on this side has
+           * any reason to replace it, and every request fails until the buffer
+           * finally comes around. `getToken` cannot help, being synchronous.
+           *
+           * The client awaits this after a 401 and retries the request once with
+           * what it returns; the same token, or nothing, means no retry, so a
+           * doomed request is never sent — or billed — twice.
+           *
+           * It REJECTS when the refresh itself fails, and that is left to
+           * propagate out of `send` deliberately: the consumer learns the token
+           * endpoint is down rather than being told the API rejected them. Same
+           * answer the pre-flight `ensureValidToken` path already gives.
+           */
+          refreshToken: async () => {
+            await refreshToken()
+            return tokenRef.current
+          },
         })
 
         // A plain object, not Object.create(baseClient): the prototype hack was
@@ -309,7 +331,7 @@ export function LocationClientProvider({
       mountedRef.current = false
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [getToken])
+  }, [getToken, refreshToken])
 
   return (
     <LocationClientContext.Provider

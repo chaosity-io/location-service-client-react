@@ -14,7 +14,7 @@ else — commands, types, map helpers — comes from the core package.
 ```bash
 npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
-npm test            # vitest run — 24 tests across 4 files
+npm test            # vitest run — 28 tests across 5 files
 npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run test:watch  # vitest interactive
 npm run lint        # eslint . AND prettier --check .
@@ -75,6 +75,15 @@ in a consumer's app. So:
   the same release cycle;
 - `maplibre-gl` and `react` keep ordinary caret/or ranges, because those are
   post-1.0 and semver behaves normally.
+
+The other half of that trade-off is quieter: a core feature this package uses is
+simply absent below the version that added it, with nothing to say so. The
+provider passes `refreshToken` to the client so a 401 on a revoked token can
+self-heal (#19); on core `0.6.x` the field does not exist, is ignored, and the
+request fails exactly as it did before — no crash, no warning, and the peer range
+still says `>=0.3.0`. Nothing is going to catch that for you, so state the
+version a feature needs in the README beside the feature, which is the only place
+a consumer looks.
 
 This package is itself `0.x`, so **its own breaking changes go in the MINOR**,
 not the major — `^0.4.0` will never resolve `0.5.0`, and that is the only signal
