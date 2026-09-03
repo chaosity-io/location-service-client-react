@@ -14,7 +14,7 @@ else — commands, types, map helpers — comes from the core package.
 ```bash
 npm run build       # tsc (ESM) + tsc -p tsconfig.cjs.json (CJS) + the CJS marker
 npm run dev         # tsc --watch
-npm test            # vitest run — 28 tests across 5 files
+npm test            # vitest run
 npm run smoke       # loads dist/ as ESM and as CJS — run it after build
 npm run test:watch  # vitest interactive
 npm run lint        # eslint . AND prettier --check .
