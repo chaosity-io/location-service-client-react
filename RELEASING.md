@@ -28,16 +28,28 @@ git push --delete origin v0.2.0 && git tag -d v0.2.0
 
 ## This package releases AFTER location-client
 
-`@chaosity/location-client-react` depends on `@chaosity/location-client`. A caret
+`@chaosity/location-client-react` declares `@chaosity/location-client` twice: a
+wide **peer** range (`>=`), which stays put — `AGENTS.md` says why — and a
+**devDependency** caret, which is what this repo builds and tests against. A caret
 range on a `0.x` version does not cross the minor — `^0.1.14` will never resolve
-`0.2.0` — so a client minor bump means this package's dependency range has to
-move too, and it cannot until the client is actually on npm.
+`0.2.0` — so a client minor bump means the devDependency has to move too, and it
+cannot until the client is actually on npm (#25).
 
-Order, whenever both change:
+Order, whenever the client has shipped a minor:
 
 1. release `@chaosity/location-client`, wait for it to appear on npm
-2. on the release branch here, bump the `@chaosity/location-client` range **and**
-   run `npm version` — one PR, one tag
+2. on the release branch here, move the devDependency, commit it, **then** run
+   `npm version` — one PR, one tag:
+
+   ```bash
+   npm ci                                            # npm outdated reads the installed tree; without one it reports nothing
+   npm outdated @chaosity/location-client            # Wanted ≠ Latest: the range cannot reach the release
+   npm install -D @chaosity/location-client@latest   # writes ^<latest>
+   rm -rf node_modules && npm ci                     # the lockfile proof, then the full gate
+   git commit package.json package-lock.json -m "Move the @chaosity/location-client devDependency to ^<latest>"
+   npm version <type>                                # refuses a dirty tree — hence the commit before it
+   ```
+
 3. merge
 
 ## The tag records the release; it does not cause it
