@@ -29,8 +29,10 @@ fails the lint step. Use `lint:fix`, not bare `eslint --fix`.
 `.husky/pre-push` runs `npm ci --dry-run` (lockfile drift), `npm run lint`,
 `npm test`, **`npm run build`**, then **`npm run smoke`** — so a push needs a
 clean compile and a package that actually loads, not just green tests. Type
-errors that vitest tolerates are stopped by the build; a package that compiles
-but cannot be `import`ed is stopped by the smoke step (see Conventions).
+errors in `src/` that vitest tolerates are stopped by the build — but only in
+`src/`: nothing type-checks `test/` (see the devDependency note below); a
+package that compiles but cannot be `import`ed is stopped by the smoke step (see
+Conventions).
 
 ## The whole public surface
 
@@ -88,6 +90,28 @@ a consumer looks.
 This package is itself `0.x`, so **its own breaking changes go in the MINOR**,
 not the major — `^0.4.0` will never resolve `0.5.0`, and that is the only signal
 a consumer gets. `RELEASING.md` has the procedure.
+
+### The devDependency on the core is moved by hand
+
+The peer range is open, but `devDependencies` pins the core with an ordinary
+caret — and a caret on a `0.x` version never crosses the minor. So while every
+consumer installs the newest core, the build, the tests and the smoke run
+against whichever minor the caret was last moved to, and nothing moves it for
+you (#25). When the core ships a minor, move it here:
+
+```bash
+npm ci                                            # npm outdated reads the installed tree; without one it reports nothing
+npm outdated @chaosity/location-client            # Wanted ≠ Latest: the range cannot reach the release
+npm install -D @chaosity/location-client@latest   # writes ^<latest>
+rm -rf node_modules && npm ci                     # the lockfile proof
+```
+
+then the push gate. At a release, `RELEASING.md` has the order, including the
+commit `npm version` needs. Do not expect the bump to go red where the
+core removed something: `test/` is outside `tsconfig.json`'s `include`, vitest
+does not type-check, and the tests `vi.mock` the core — so a test
+that names a field the core dropped keeps passing (#24). Read the core's
+changes for what they removed, and look for it in `test/` by name.
 
 ## Credentials never reach this package
 

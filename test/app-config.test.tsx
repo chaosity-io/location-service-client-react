@@ -21,7 +21,7 @@ import {
  * have succeeded into a 400.
  */
 
-const CLAIMS = { biasDecimals: 5, countries: ['AU', 'NZ'] }
+const CLAIMS = { countries: ['AU', 'NZ'] }
 const getAppConfig = vi.fn(() => CLAIMS)
 
 vi.mock('@chaosity/location-client', () => ({
@@ -48,11 +48,7 @@ function Show() {
   const { client } = useLocationClient()
   if (!client) return <span>loading</span>
   const cfg = client.getAppConfig()
-  return (
-    <span data-testid="cfg">
-      {cfg.biasDecimals}|{(cfg.countries ?? []).join(',')}
-    </span>
-  )
+  return <span data-testid="cfg">{(cfg.countries ?? []).join(',')}</span>
 }
 
 const renderWithProvider = () =>
@@ -71,7 +67,7 @@ describe('getAppConfig reaches React consumers', () => {
   it('forwards the claims through the provider wrapper', async () => {
     renderWithProvider()
     await waitFor(() =>
-      expect(screen.getByTestId('cfg').textContent).toBe('5|AU,NZ'),
+      expect(screen.getByTestId('cfg').textContent).toBe('AU,NZ'),
     )
   })
 
