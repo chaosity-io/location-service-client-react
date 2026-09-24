@@ -47,21 +47,22 @@ export interface LocationClient {
     options?: SendOptions,
   ): Promise<TOutput>
   /**
-   * This application's own configuration, read from the access token —
-   * bias precision, and the countries it is scoped to (api#65).
+   * This application's own configuration, read from the access token
+   * (api#65). The fields are whatever the installed @chaosity/location-client
+   * reads — its `AppConfigClaims` is the list, and this passes that client's
+   * answer through unchanged. So a field the core adds appears here with no
+   * change to this package, and is absent under a core too old to read it;
+   * the peer range cannot say which.
    *
    * Here so a React app can SHOW its own settings: populate a country
    * selector with the markets it serves, label a settings screen. Being a
    * few minutes stale is cosmetic for that.
    *
-   * It is not an entitlement check, and the `countries` value must not be
-   * used to shape requests. The token is a snapshot; the API reads the scope
-   * fresh from the application row on every call. Injecting a stale scope
-   * turns a request that would have succeeded into a 400. See
+   * It is not an entitlement check, and none of it may be used to shape or
+   * refuse requests. The token is a snapshot; the API reads every setting
+   * fresh from the application on every call. Injecting a stale country
+   * scope turns a request that would have succeeded into a 400. See
    * `AppConfigClaims` in @chaosity/location-client for the measurement.
-   *
-   * Returns `{}` when the token carries no application config, which is the
-   * case until one is set in the portal.
    */
   getAppConfig(): AppConfigClaims
 }
