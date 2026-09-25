@@ -29,11 +29,17 @@ git push --delete origin v0.2.0 && git tag -d v0.2.0
 ## This package releases AFTER location-client
 
 `@chaosity/location-client-react` declares `@chaosity/location-client` twice: a
-wide **peer** range (`>=`), which stays put — `AGENTS.md` says why — and a
-**devDependency** caret, which is what this repo builds and tests against. A caret
-range on a `0.x` version does not cross the minor — `^0.1.14` will never resolve
-`0.2.0` — so a client minor bump means the devDependency has to move too, and it
-cannot until the client is actually on npm (#25).
+wide **peer** range (`>=`), whose floor moves only when this package's own code
+or types need a newer core — `AGENTS.md` says when; `verifyAddress` moved it to
+`0.10.0` — and a **devDependency** caret, which is what this repo builds and
+tests against. A caret range on a `0.x` version does not cross the minor —
+`^0.1.14` will never resolve `0.2.0` — so a client minor bump means the
+devDependency has to move too, and it cannot until the client is actually on
+npm (#25).
+
+A release that raises the peer floor is a **minor**: a consumer on an older core
+who takes it gets a peer conflict on install, and on `0.x` a breaking change goes
+in the minor.
 
 Order, whenever the client has shipped a minor:
 

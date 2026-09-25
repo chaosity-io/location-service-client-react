@@ -57,16 +57,23 @@ where it can be used by consumers who are not on React.
 
 ```json
 "peerDependencies": {
-  "@chaosity/location-client": ">=0.3.0",
+  "@chaosity/location-client": ">=0.10.0",
   "maplibre-gl": "^5.0.0",
   "react": "^18.0.0 || ^19.0.0"
 }
 ```
 
-`>=0.3.0`, **not** `^0.3.0`. That matters on a pre-1.0 core: npm treats each
-`0.x` minor as incompatible, so a caret range here would refuse every core
-release after `0.3.x` and force a lockstep bump of this package for each one.
-The open range lets a consumer take core `0.5.x` or `0.6.x` without waiting.
+`>=`, **not** `^`. That matters on a pre-1.0 core: npm treats each `0.x` minor
+as incompatible, so a caret range here would refuse every core release after
+the pinned minor and force a lockstep bump of this package for each one. The
+open range lets a consumer take every later core minor without waiting.
+
+The floor is the oldest core this package's own code and types work with, and
+it moves only when that changes. It went from `0.3.0` to `0.10.0` with
+`verifyAddress` (#26): the provider forwards the core's method and types its
+answer with the core's `VerifyAddressResponse`, so below `0.10.0` the declaration
+files do not compile and the method is not a function. A feature that degrades
+quietly on an older core, as `refreshToken` does below, does not move it.
 
 The trade-off is real and worth stating: this package does **not** get npm's
 protection against a breaking core change. When the core removes or renames
@@ -82,8 +89,8 @@ The other half of that trade-off is quieter: a core feature this package uses is
 simply absent below the version that added it, with nothing to say so. The
 provider passes `refreshToken` to the client so a 401 on a revoked token can
 self-heal (#19); on core `0.6.x` the field does not exist, is ignored, and the
-request fails exactly as it did before — no crash, no warning, and the peer range
-still says `>=0.3.0`. Nothing is going to catch that for you, so state the
+request fails exactly as it did before — no crash, no warning, and nothing in
+the peer range says otherwise. Nothing is going to catch that for you, so state the
 version a feature needs in the README beside the feature, which is the only place
 a consumer looks.
 
@@ -112,6 +119,16 @@ core removed something: `test/` is outside `tsconfig.json`'s `include`, vitest
 does not type-check, and the tests `vi.mock` the core — so a test
 that names a field the core dropped keeps passing (#24). Read the core's
 changes for what they removed, and look for it in `test/` by name.
+
+This bump is also when the provider has to follow the core. `LocationClient`
+and `SendOptions` restate the core client's surface by hand, and
+`test/core-surface.test.ts` compares them with the installed core's
+`GeoPlacesClient` using TypeScript's checker. It goes red naming each public
+member or `send` option the core has gained, as it did for `verifyAddress` and
+for `overallTimeoutMs`, which had been missing since core 0.8.0 (#26). Forward
+a member that sends a request behind `ensureValidTokenRef`, as `send` and
+`verifyAddress` are. Forward a synchronous read bare, as `getAppConfig` is.
+Never exempt a member from the test.
 
 ## Credentials never reach this package
 

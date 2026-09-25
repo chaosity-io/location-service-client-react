@@ -61,7 +61,12 @@ function SearchComponent() {
   const searchPlaces = async (query: string) => {
     if (!client) return
     const response: SuggestCommandOutput = await client.send(
-      new SuggestCommand({ QueryText: query, MaxResults: 5 }),
+      new SuggestCommand({
+        QueryText: query,
+        MaxResults: 5,
+        // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+        BiasPosition: [-123.1207, 49.2827],
+      }),
     )
     return response.ResultItems
   }
@@ -142,7 +147,7 @@ const { client, getToken, loading, error } = useLocationClient()
 
 **Returns:**
 
-- `client` (`LocationClient | null`) — The location client. Not a bare `GeoPlacesClient`: the provider wraps it so `send()` refreshes the token first when it needs to, and retries once if the API rejects it.
+- `client` (`LocationClient | null`) — The location client. Not a bare `GeoPlacesClient`: the provider wraps it so `send()` and `verifyAddress()` refresh the token first when they need to, and retry once if the API rejects it.
 - `getToken` (`() => string | undefined`) — Returns the current token. Useful for direct API calls (e.g., map style fetch).
 - `loading` (`boolean`) — Whether the client is initializing.
 - `error` (`string | null`) — Error message if initialization or token refresh failed.
@@ -158,7 +163,8 @@ The provider owns the token lifecycle. There is nothing to manage manually.
    `exp`. This is what keeps a map alive: MapLibre requests tiles, glyphs and
    sprites directly, never through `send()`, so a refresh that happened only
    inside `send()` would never fire for them.
-3. `send()` checks too, and refreshes first if the token is inside that window.
+3. `send()` and `verifyAddress()` check too, and refresh first if the token is
+   inside that window.
 4. Returning to a backgrounded tab refreshes immediately — a throttled tab's
    timer can be arbitrarily late.
 5. If the API rejects a token **before** its `exp` — revoked from the portal, or
@@ -166,13 +172,13 @@ The provider owns the token lifecycle. There is nothing to manage manually.
    the request is retried once with the new token. Nothing on this side has any
    other reason to replace that token, so without this the failures continue
    until the timer next comes around: for a token with 14 minutes left, 14
-   minutes of a broken page. Needs `@chaosity/location-client` 0.7.0 or later;
-   on older versions the other five steps still work.
+   minutes of a broken page. The core added this in 0.7.0, so every core this
+   package's peer range admits has it.
 6. Concurrent refreshes are deduplicated — everything waiting shares one call to
    `getConfig`.
 
 A refresh that fails is reported as `error` from `useLocationClient()`, and
-rejects the `send()` that triggered it — with the refresh error rather than a
+rejects the `send()` or `verifyAddress()` that triggered it — with the refresh error rather than a
 401, so the cause reads as the token endpoint being unreachable and not as the
 API refusing you.
 
@@ -322,12 +328,61 @@ function MyComponent() {
 
   const search = async () => {
     const response: SuggestCommandOutput = await client!.send(
-      new SuggestCommand({ QueryText: 'Vancouver', MaxResults: 5 }),
+      new SuggestCommand({
+        QueryText: 'Vancouver',
+        MaxResults: 5,
+        // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+        BiasPosition: [-123.1207, 49.2827],
+      }),
     )
     return response.ResultItems
   }
 }
 ```
+
+## Verifying an address
+
+`POST /address/verify` resolves the PlaceId a person chose — a building, or a
+unit from its `SecondaryAddresses` — to the full place record plus `verified`.
+It is the one Places result you may store; the core package's README has the
+whole flow. **Needs `@chaosity/location-client` 0.10.0 or later**, which is this
+package's peer range from the release that adds `verifyAddress`.
+
+```tsx
+import { useLocationClient } from '@chaosity/location-client-react'
+
+function useVerifyOnSubmit() {
+  const { client } = useLocationClient()
+
+  // Call it from the submit handler, once per chosen PlaceId.
+  return async (placeId: string) => {
+    const answer = await client!.verifyAddress(placeId)
+    return answer.verified ? answer : undefined // `answer` is what you may keep
+  }
+}
+```
+
+The same request as a command, through `send`:
+
+```tsx
+import {
+  VerifyAddressCommand,
+  type VerifyAddressResponse,
+} from '@chaosity/location-client'
+
+const answer: VerifyAddressResponse = await client!.send(
+  new VerifyAddressCommand({ PlaceId: placeId }),
+)
+```
+
+Either form goes through the provider's pre-send refresh and its 401 retry,
+exactly as `send` does. A `verified: false` resolves; it is not an error.
+
+**Every verify is billed, whether or not the address verifies.** That is why
+there is no `useVerifyAddress` hook. A hook keyed on a PlaceId would call on
+every pick, including picks nobody submits, so the call belongs in your submit
+handler instead. Keeping one answer per PlaceId is up to you: a verify result
+may be stored, so keep it for as long as your form lives.
 
 ## Logging
 
@@ -349,7 +404,11 @@ import {
 
 const { client } = useLocationClient()
 const response: SuggestCommandOutput = await client!.send(
-  new SuggestCommand({ QueryText: 'Vancouver' }),
+  new SuggestCommand({
+    QueryText: 'Vancouver',
+    // Suggest takes exactly one of BiasPosition, Filter.BoundingBox or Filter.Circle.
+    BiasPosition: [-123.1207, 49.2827],
+  }),
 )
 ```
 
