@@ -1,6 +1,9 @@
 'use client'
 
-import type { ClientConfig } from '@chaosity/location-client'
+import type {
+  ClientConfig,
+  VerifyAddressResponse,
+} from '@chaosity/location-client'
 import {
   type AppConfigClaims,
   GeoPlacesClient,
@@ -23,12 +26,19 @@ const log = debug('location-client-react:provider')
 /**
  * Per-request transport options.
  *
- * Declared structurally rather than imported so this package builds against the
- * currently published client; it matches `SendOptions` there exactly.
+ * Declared structurally rather than imported, like `LocationClient` below. A
+ * hand copy does not move when the core does — `overallTimeoutMs` reached the
+ * core in 0.8.0 and not this copy (#26) — so `test/core-surface.test.ts` fails
+ * while the core's `SendOptions` has a key this one lacks.
  */
 export interface SendOptions {
+  /** Caller cancellation. Aborting rejects with code `AbortedException`. */
   signal?: AbortSignal
+  /** Per ATTEMPT, not for the whole call. */
   timeoutMs?: number
+  /** The whole call: attempts and the waits between them. Core 0.8.0+. */
+  overallTimeoutMs?: number
+  /** `false` disables retries entirely. */
   retry?: false | { maxAttempts?: number }
 }
 
@@ -39,6 +49,9 @@ export interface SendOptions {
  * real client to refresh tokens first, and a class with private fields is not
  * structurally assignable — which is why this used to be an `Object.create`
  * prototype hack.
+ *
+ * It must carry every public member of the core client this package builds
+ * with: `test/core-surface.test.ts` fails when the core gains one (#26).
  */
 export interface LocationClient {
   readonly config: { serviceId: string }
@@ -46,6 +59,22 @@ export interface LocationClient {
     command: TInput,
     options?: SendOptions,
   ): Promise<TOutput>
+  /**
+   * Verify a PlaceId through `POST /address/verify`: the full place record plus
+   * `verified`, the one Places result an integrator may store (#26). A
+   * `verified: false` resolves; it is not an error. Refreshes a stale token
+   * first, as `send` does.
+   *
+   * Needs @chaosity/location-client 0.10.0 or later, the peer range's floor.
+   * `send(new VerifyAddressCommand({ PlaceId }))` is the same request.
+   *
+   * Billed per call, whether or not the address verifies: call it once per
+   * chosen PlaceId, at submit.
+   */
+  verifyAddress(
+    placeId: string,
+    options?: SendOptions,
+  ): Promise<VerifyAddressResponse>
   /**
    * This application's own configuration, read from the access token
    * (api#65). The fields are whatever the installed @chaosity/location-client
@@ -301,6 +330,15 @@ export function LocationClientProvider({
                 o?: SendOptions,
               ) => Promise<TOutput>
             )(command, options)
+          },
+          // Behind the same pre-send refresh as `send`: forwarding it bare
+          // would send a stale token that `send` would have replaced (#26).
+          async verifyAddress(
+            placeId: string,
+            options?: SendOptions,
+          ): Promise<VerifyAddressResponse> {
+            await ensureValidTokenRef.current()
+            return baseClient.verifyAddress(placeId, options)
           },
           // Reads whatever token the client currently holds. Deliberately not
           // awaiting a refresh: this is display data, callers expect it to be
