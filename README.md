@@ -77,7 +77,7 @@ function SearchComponent() {
 
 ### useMapLanguage
 
-React hook that keeps map label language in sync. Automatically reapplies after `map.setStyle()` calls (e.g. when switching color schemes or terrain).
+React hook that keeps map label language in sync. Automatically reapplies after `map.setStyle()` calls (e.g. when switching color schemes).
 
 ```tsx
 import { useMapLanguage } from '@chaosity/location-client-react'
@@ -200,6 +200,7 @@ export default function MapComponent() {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const [mapInstance, setMapInstance] = useState<maplibregl.Map | null>(null)
+  const [mapError, setMapError] = useState<string | null>(null)
   const [language, setLanguage] = useState('en')
   const { client, getToken, loading, error } = useLocationClient()
 
@@ -209,11 +210,9 @@ export default function MapComponent() {
   useEffect(() => {
     if (!mapContainer.current || map.current || loading || !client) return
     ;(async () => {
-      // Fetch style with terrain, 3D buildings, and language baked into the descriptor
+      // Fetch the style with the language baked into the descriptor
       const style = await fetchMapStyle(API_URL, 'Standard', getToken, {
         colorScheme: 'Light',
-        terrain: 'Terrain3D',
-        buildings: 'Buildings3D',
         language,
       })
 
@@ -222,16 +221,13 @@ export default function MapComponent() {
         style,
         center: [-123.12, 49.28],
         zoom: 10,
-        maxPitch: 85,
         transformRequest: createTransformRequest(API_URL, getToken),
       })
+      // Held at once, so the catch and the cleanup below can remove it
+      map.current = instance
 
       instance.addControl(
         new maplibregl.NavigationControl({ visualizePitch: true }),
-        'top-right',
-      )
-      instance.addControl(
-        new maplibregl.TerrainControl({ source: 'amazon' }),
         'top-right',
       )
 
@@ -243,9 +239,15 @@ export default function MapComponent() {
       })
       instance.addControl(geocoder, 'top-left')
 
-      map.current = instance
       setMapInstance(instance)
-    })()
+    })().catch((err: unknown) => {
+      // A refused style request lands here, and its message says why — for
+      // an option outside the application's plan, it names the feature.
+      // Anything that failed after the map was built removes it too.
+      map.current?.remove()
+      map.current = null
+      setMapError(err instanceof Error ? err.message : String(err))
+    })
 
     return () => {
       if (map.current) {
@@ -257,11 +259,35 @@ export default function MapComponent() {
   }, [client, getToken, loading])
 
   if (error) return <div>Error: {error}</div>
+  if (mapError) return <div>Map unavailable: {mapError}</div>
   if (loading) return <div>Loading map...</div>
 
   return <div ref={mapContainer} style={{ width: '100%', height: '600px' }} />
 }
 ```
+
+Some map options are features of the application's plan, and a plan without
+one refuses the style request with 403 `FeatureNotEntitledException`, which the
+`catch` above puts on screen. 3D terrain and buildings need the `terrain` and `buildings` plan features:
+
+```tsx
+const style = await fetchMapStyle(API_URL, 'Standard', getToken, {
+  colorScheme: 'Light',
+  terrain: 'Terrain3D',
+  buildings: 'Buildings3D',
+  language,
+})
+
+// …then `maxPitch: 85` on the map, and a control to toggle the terrain. The
+// descriptor names its own elevation source, so read it rather than typing it:
+instance.addControl(
+  new maplibregl.TerrainControl({ source: style.terrain!.source }),
+  'top-right',
+)
+```
+
+`@chaosity/location-client`'s README lists every plan feature and what asks
+for it.
 
 ### useMapLanguage
 
