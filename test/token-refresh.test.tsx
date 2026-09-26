@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { LocationClient } from '../src/provider/LocationClientProvider'
 import {
   LocationClientProvider,
   useLocationClient,
@@ -42,32 +43,39 @@ const LIFETIME = 900_000
 
 /**
  * Captures the provider's `getToken` so a test can call it the way MapLibre
- * does — at request time, not at render time. `tokenRef` is a ref on purpose:
- * a refresh must not re-render the whole map tree, so asserting on rendered
- * text would be asserting the wrong thing.
+ * does — at request time, not at render time. The token lives on the
+ * provider's `ConfigState`, not in React state, on purpose: a refresh must not
+ * re-render the whole map tree, so asserting on rendered text would be
+ * asserting the wrong thing.
  */
 let readToken: () => string | undefined = () => undefined
+let client: LocationClient | null = null
 
 function TokenProbe() {
-  const { getToken, error } = useLocationClient()
-  readToken = getToken
-  return <span data-testid="error">{error ?? ''}</span>
+  const ctx = useLocationClient()
+  readToken = ctx.getToken
+  client = ctx.client
+  return <span data-testid="error">{ctx.error ?? ''}</span>
 }
 
 let getConfig: ReturnType<typeof vi.fn>
 let issued: number
 
+/** A fresh token per call, as a server that mints on every ask would give. */
+const issue = async () => {
+  issued += 1
+  return {
+    apiUrl: 'https://api.test',
+    token: `token-${issued}`,
+    expiresAt: Date.now() + LIFETIME,
+  }
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
   issued = 0
-  getConfig = vi.fn(async () => {
-    issued += 1
-    return {
-      apiUrl: 'https://api.test',
-      token: `token-${issued}`,
-      expiresAt: Date.now() + LIFETIME,
-    }
-  })
+  client = null
+  getConfig = vi.fn(issue)
 })
 
 afterEach(() => {
@@ -136,8 +144,10 @@ describe('refresh failure is not hidden', () => {
     await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
 
     getConfig.mockRejectedValueOnce(new Error('token endpoint unavailable'))
+    // To the refresh point and no further: a retry follows within 1–2 s now
+    // (#36), and would clear the error before it could be read.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(LIFETIME - 60_000 + 1_000)
+      await vi.advanceTimersByTimeAsync(LIFETIME - 60_000)
     })
 
     await waitFor(() =>
@@ -153,7 +163,7 @@ describe('refresh failure is not hidden', () => {
 
     getConfig.mockRejectedValueOnce(new Error('transient'))
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(LIFETIME - 60_000 + 1_000)
+      await vi.advanceTimersByTimeAsync(LIFETIME - 60_000)
     })
     await waitFor(() =>
       expect(screen.getByTestId('error').textContent).toBe('transient'),
@@ -235,6 +245,284 @@ describe('it cannot out-run the server (the 0.2.0 spin)', () => {
       await vi.advanceTimersByTimeAsync(60_000)
     })
 
+    expect(getConfig).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** Where the timer first refreshes: the token's expiry less the 60 s buffer. */
+const REFRESH_POINT = LIFETIME - 60_000
+
+/** A JWT whose `exp` is `secondsLeft` from now by this (the browser's) clock. */
+const tokenExpiringIn = (secondsLeft: number, n = 0) =>
+  `h.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + secondsLeft, n }))}.s`
+
+describe('a failed refresh is paced (#36)', () => {
+  /**
+   * After one failed refresh the token is past its buffer, so every
+   * synchronous `getToken()` read found no refresh in flight and started one.
+   * MapLibre reads it for every tile, glyph and sprite, so a map on screen
+   * asked the application's token route as fast as that route could fail. An
+   * idle page, the opposite: nothing rescheduled, so nothing retried.
+   */
+  const slowDown = () =>
+    Object.assign(new Error('slow down'), { retryAfterMs: 45_000 })
+
+  it('waits out retryAfterMs: 50 reads over the next 45 s ask once, when it has passed', async () => {
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+    getConfig.mockImplementation(async () => {
+      throw slowDown()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+    await waitFor(() =>
+      expect(screen.getByTestId('error').textContent).toBe('slow down'),
+    )
+
+    // A map on screen: 50 reads spread over the next 43 s.
+    for (let i = 0; i < 50; i++) {
+      await act(async () => {
+        readToken()
+        await vi.advanceTimersByTimeAsync(860)
+      })
+    }
+    expect(getConfig).toHaveBeenCalledTimes(2)
+
+    getConfig.mockImplementation(issue)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(3)
+    expect(readToken()).toBe('token-2')
+  })
+
+  it.each([
+    ['whatever the jitter draws', 0],
+    ['and grows between attempts', 0.999],
+  ])(
+    'with no retryAfterMs it backs off, never faster than the base, %s',
+    async (_, draw) => {
+      vi.spyOn(Math, 'random').mockReturnValue(draw)
+      renderProvider()
+      await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+      const at: number[] = []
+      getConfig.mockImplementation(async () => {
+        at.push(Date.now())
+        throw new Error('down')
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+      })
+
+      // A map reading its token four times a second, for three minutes.
+      for (let i = 0; i < 4 * 180; i++) {
+        await act(async () => {
+          readToken()
+          await vi.advanceTimersByTimeAsync(250)
+        })
+      }
+
+      const gaps = at.slice(1).map((t, i) => t - at[i])
+      expect(gaps.length).toBeGreaterThan(3)
+      for (const gap of gaps) expect(gap).toBeGreaterThanOrEqual(1_000)
+      if (draw > 0.5) {
+        // Doubling each time: about 2 s, 4 s, 8 s, 16 s…
+        for (let i = 1; i < 4; i++) {
+          expect(gaps[i]).toBeGreaterThan(gaps[i - 1] * 1.9)
+        }
+        // …until the cap, where it stays.
+        expect(Math.max(...gaps)).toBeGreaterThanOrEqual(29_000)
+        expect(Math.max(...gaps)).toBeLessThanOrEqual(30_000 + 250)
+      }
+    },
+  )
+
+  it("an idle page still retries, and a success schedules from the new token's expiry", async () => {
+    // The lowest draw, so the retry comes exactly at the 1 s base and the
+    // next refresh can be timed from it.
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+    getConfig.mockRejectedValueOnce(new Error('blip'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+
+    // No reads at all: the provider's own timer is what retries.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(3)
+    expect(readToken()).toBe('token-2')
+    await waitFor(() =>
+      expect(screen.getByTestId('error').textContent).toBe(''),
+    )
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT - 1_000)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(3)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(4)
+  })
+
+  it('a send during the wait goes out with the token in hand while it is before its exp', async () => {
+    // The refresh point is 60 s before exp: the token is still one the API
+    // accepts, and the map is sending it for every tile. A send refused here
+    // while the tiles load would be the two paths disagreeing (Mehdi, 26 Sep).
+    renderProvider()
+    await waitFor(() => expect(client).not.toBeNull())
+
+    getConfig.mockRejectedValueOnce(new Error('down'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      await expect(client!.send({})).resolves.toEqual({ ok: true })
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+    await waitFor(() =>
+      expect(screen.getByTestId('error').textContent).toBe('down'),
+    )
+  })
+
+  it('past its exp, a send during the wait is refused with that failure, without asking again', async () => {
+    renderProvider()
+    await waitFor(() => expect(client).not.toBeNull())
+
+    getConfig.mockRejectedValueOnce(
+      Object.assign(new Error('slow down'), { retryAfterMs: 120_000 }),
+    )
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+
+    // Past the token's own exp, still inside the server's Retry-After.
+    vi.setSystemTime(Date.now() + 61_000)
+    await act(async () => {
+      await expect(client!.send({})).rejects.toThrow('slow down')
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it("a returning tab or network never overrides the server's Retry-After", async () => {
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+    getConfig.mockRejectedValueOnce(slowDown())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('a returning network overrides our own backoff, which was only a guess', async () => {
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+
+    getConfig.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_POINT)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(getConfig).toHaveBeenCalledTimes(3)
+    expect(readToken()).toBe('token-2')
+  })
+})
+
+describe('a token that arrives already stale (#35)', () => {
+  /**
+   * The provider judges a token stale at `exp − 60 s` by the BROWSER's clock;
+   * the documented server path hands back its cached token until `exp − 60 s`
+   * by the SERVER's. With the browser ahead, the token is stale on arrival,
+   * the refresh timer computed a delay of 0, and `getConfig` was asked again
+   * as soon as it answered — 91 times in 2 s in the ticket's measurement.
+   */
+  it('a clock 30 s ahead: getConfig is asked a bounded number of times', async () => {
+    // What a warm server-side cache returns: the same token, again and again.
+    const token = tokenExpiringIn(30)
+    getConfig = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+      return { apiUrl: 'https://api.test', token }
+    })
+
+    renderProvider()
+    // Two seconds, with a map reading its token as it draws.
+    for (let i = 0; i < 40; i++) {
+      await act(async () => {
+        readToken()
+        await vi.advanceTimersByTimeAsync(50)
+      })
+    }
+
+    expect(getConfig.mock.calls.length).toBeGreaterThanOrEqual(1)
+    expect(getConfig.mock.calls.length).toBeLessThanOrEqual(3)
+  })
+
+  it('a clock 15 minutes ahead: the rate stays bounded for as long as the tab is open', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5)
+    // Every token the server mints is at its exp already, by this clock.
+    getConfig = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 20))
+      issued += 1
+      return { apiUrl: 'https://api.test', token: tokenExpiringIn(0, issued) }
+    })
+
+    renderProvider()
+    await waitFor(() => expect(getConfig).toHaveBeenCalledTimes(1))
+    // Two minutes to reach the cap, then count ten more, reading every 2 s.
+    const tick = async (seconds: number) => {
+      for (let i = 0; i < seconds / 2; i++) {
+        await act(async () => {
+          readToken()
+          await vi.advanceTimersByTimeAsync(2_000)
+        })
+      }
+    }
+    await tick(120)
+    const warm = getConfig.mock.calls.length
+    await tick(600)
+
+    // At the cap, with this draw, one ask per 15 s: 40 in ten minutes.
+    expect(getConfig.mock.calls.length - warm).toBeLessThanOrEqual(41)
+  })
+
+  it('a send in the meantime goes out with the token in hand', async () => {
+    // The server handed this token back, so the server still accepts it; only
+    // this browser's clock disagrees.
+    const token = tokenExpiringIn(30)
+    getConfig = vi.fn(async () => ({ apiUrl: 'https://api.test', token }))
+
+    renderProvider()
+    await waitFor(() => expect(client).not.toBeNull())
+    expect(getConfig).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      for (let i = 0; i < 5; i++) await client!.send({})
+    })
     expect(getConfig).toHaveBeenCalledTimes(1)
   })
 })

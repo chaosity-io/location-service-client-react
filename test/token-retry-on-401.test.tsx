@@ -171,3 +171,53 @@ describe('a failed refresh reports itself', () => {
     )
   })
 })
+
+describe('while the token route is failing (#36)', () => {
+  it('a 401 does not ask the failing route again', async () => {
+    // Every request of a busy page would otherwise reach `getConfig` — and,
+    // behind it, the token endpoint that is already failing.
+    fetchMock.mockImplementation(async () => unauthorized())
+    await mount()
+    getConfig.mockRejectedValueOnce(new Error('token endpoint unavailable'))
+
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        await expect(client!.send(suggest())).rejects.toThrow(
+          'token endpoint unavailable',
+        )
+      })
+    }
+
+    // The mount, and the first 401's refresh. Not the second 401's.
+    expect(getConfig).toHaveBeenCalledTimes(2)
+    // One request per send, neither retried.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('a token that arrived stale here (#35)', () => {
+  it('is still replaced when the API refuses it', async () => {
+    // The floor that stops a fast browser clock asking again and again must
+    // not stop #19's self-heal: a 401 is the server's word, not this clock's.
+    const stale = `h.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 30 }))}.s`
+    getConfig.mockImplementationOnce(async () => {
+      issued.push(stale)
+      return { apiUrl: 'https://api.test', token: stale }
+    })
+    fetchMock
+      .mockResolvedValueOnce(unauthorized())
+      .mockResolvedValueOnce(ok({ ResultItems: [] }))
+
+    await mount()
+
+    let result: unknown
+    await act(async () => {
+      result = await client!.send(suggest())
+    })
+
+    expect(result).toEqual({ ResultItems: [] })
+    expect(getConfig).toHaveBeenCalledTimes(2)
+    expect(authHeader(0)).toBe(`Bearer ${stale}`)
+    expect(authHeader(1)).toBe(`Bearer ${issued[1]}`)
+  })
+})

@@ -70,6 +70,10 @@ async function mount() {
 const letTheTokenGoStale = () =>
   vi.setSystemTime(Date.now() + (LIFETIME_S - 30) * 1000)
 
+/** Past the token's own exp, timers untouched. */
+const letTheTokenExpire = () =>
+  vi.setSystemTime(Date.now() + (LIFETIME_S + 1) * 1000)
+
 const request = (n: number) => {
   const [url, init] = fetchMock.mock.calls[n] as [string, RequestInit]
   return {
@@ -145,9 +149,9 @@ describe.each([
     expect(result).toEqual(UNIT)
   })
 
-  it('rejects with the refresh error when the refresh fails, and sends nothing', async () => {
+  it('past its exp, rejects with the refresh error when the refresh fails, and sends nothing', async () => {
     await mount()
-    letTheTokenGoStale()
+    letTheTokenExpire()
     getConfig.mockRejectedValueOnce(new Error('token endpoint unavailable'))
 
     await act(async () => {
@@ -156,8 +160,26 @@ describe.each([
       )
     })
 
-    // Not a 401 from the API: the stale token was never sent.
+    // Not a 401 from the API: the expired token was never sent.
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('before its exp, verifies with the token in hand when the refresh fails', async () => {
+    // The same answer as every other request the token is good for: the map
+    // sends it for tiles, so a verify refused here would disagree with them.
+    await mount()
+    letTheTokenGoStale()
+    getConfig.mockRejectedValueOnce(new Error('token endpoint unavailable'))
+
+    let result: unknown
+    await act(async () => {
+      result = await verify(client!)
+    })
+
+    expect(result).toEqual(UNIT)
+    expect(getConfig).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(request(0).auth).toBe(`Bearer ${issued[0]}`)
   })
 
   it('heals a revoked token: refresh, and one retry', async () => {
