@@ -59,7 +59,7 @@ where it can be used by consumers who are not on React.
 "peerDependencies": {
   "@chaosity/location-client": ">=0.10.0",
   "maplibre-gl": "^5.0.0",
-  "react": "^18.0.0 || ^19.0.0"
+  "react": "^19.0.0"
 }
 ```
 
@@ -82,8 +82,11 @@ in a consumer's app. So:
 
 - a core change that alters what this package consumes needs a change here, in
   the same release cycle;
-- `maplibre-gl` and `react` keep ordinary caret/or ranges, because those are
-  post-1.0 and semver behaves normally.
+- `maplibre-gl` and `react` keep ordinary caret ranges, because those are
+  post-1.0 and semver behaves normally. Neither admits a major the suite does
+  not install: `react` admitted 18 while every build and test ran 19, and was
+  narrowed to `^19.0.0` (#29). Widening one again means running the suite
+  against the added major.
 
 The other half of that trade-off is quieter: a core feature this package uses is
 simply absent below the version that added it, with nothing to say so. The
