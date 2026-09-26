@@ -126,9 +126,11 @@ and `SendOptions` restate the core client's surface by hand, and
 `GeoPlacesClient` using TypeScript's checker. It goes red naming each public
 member or `send` option the core has gained, as it did for `verifyAddress` and
 for `overallTimeoutMs`, which had been missing since core 0.8.0 (#26). Forward
-a member that sends a request behind `ensureValidTokenRef`, as `send` and
-`verifyAddress` are. Forward a synchronous read bare, as `getAppConfig` is.
-Never exempt a member from the test.
+a member that sends a request behind the client's `ready()` — the pre-send
+refresh, and the check that its configuration is still installed — as `send`
+and `verifyAddress` are. Forward a synchronous read bare, as `getAppConfig` is:
+the core reads the token through the client's bound `getToken`, so the read
+answers empty once the client is replaced. Never exempt a member from the test.
 
 ## Credentials never reach this package
 
@@ -171,6 +173,20 @@ on the consumer's server, not in this library.
   re-asserts that no server-only core export has leaked into it. It runs in the
   push gate, in CI, and in `prepublishOnly` — the last so it guards the exact
   tarball that publishes.
+- **Per-configuration state lives on `ConfigState`** in
+  `LocationClientProvider.tsx`, never in a bare `useRef`. A new configuration
+  is a new object: a `configKey` change, or `getConfig` answering with another
+  `apiUrl` (#14). A field on it is reset by construction, while a ref is reset
+  only if someone remembers to, which is how a switch used to keep the old
+  token and URL. For the same reason, every function the provider hands out
+  checks that its configuration is still the installed one: the client's
+  methods and `getToken`. Once it is not, a request refuses, and a synchronous
+  read answers empty (`getToken()` → `undefined`, `getAppConfig()` → `{}`)
+  rather than throwing, because a consumer calls those while rendering.
+- **`getConfig` is called in one place, `refresh`.** Each outcome decides when
+  the next attempt may start, and a caller says who it is with a `Trigger`,
+  which decides whether a hold stops it (#34, #35, #36). Every call site that
+  bypassed that path asked as fast as the token route could answer.
 - Tests are vitest. React changes want a test that renders — a provider that
   compiles is not a provider that mounts.
 - Prettier runs with `prettier-plugin-organize-imports`, so import order is
