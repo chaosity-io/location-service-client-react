@@ -58,7 +58,7 @@ where it can be used by consumers who are not on React.
 ```json
 "peerDependencies": {
   "@chaosity/location-client": ">=0.10.0",
-  "maplibre-gl": "^5.0.0",
+  "maplibre-gl": "^6.4.1",
   "react": "^19.0.0"
 }
 ```
@@ -87,6 +87,15 @@ in a consumer's app. So:
   not install: `react` admitted 18 while every build and test ran 19, and was
   narrowed to `^19.0.0` (#29). Widening one again means running the suite
   against the added major.
+- `maplibre-gl` starts at 6.4.1, the first release that fixes
+  GHSA-jrc7-96c5-q579, a critical XSS in the attribution control. There is no
+  5.x fix. MapLibre 6 is ESM only with no default export, and under a bundler
+  its worker loads only after the application calls `setWorkerUrl`.
+  `test/maplibre-6.test.ts` holds the peer, the devDependency and every
+  lockfile copy at 6.4.1 or later. It also parses every README code block:
+  none may default-import or `require` `maplibre-gl`, and each one that builds
+  a map sets the worker. A block that imports nothing from it is read as naming
+  it `maplibregl`.
 
 The other half of that trade-off is quieter: a core feature this package uses is
 simply absent below the version that added it, with nothing to say so. The

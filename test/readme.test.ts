@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+import { codeBlocks } from './readme-blocks'
+
 /**
  * The README's examples run on any plan (#27).
  *
@@ -30,34 +32,15 @@ const README = readFileSync(join(here, '../README.md'), 'utf8')
 const GATED =
   /Terrain3D|Buildings3D|Hillshade|Satellite|Hybrid|traffic|contour|travelModes|politicalView|\bterrain\s*:|\bbuildings\s*:|TerrainControl|setTerrain\(|\b(access|contact|timeZone)\s*:|['"](Access|Contact|Phonemes|TimeZone)['"]/
 
-interface Block {
-  line: number
-  code: string
-  marked: boolean
-}
-
 /** Fenced code blocks, and whether the last prose line above names "plan feature". */
-const codeBlocks = (markdown: string): Block[] => {
-  const lines = markdown.split('\n')
-  const blocks: Block[] = []
-  for (let i = 0; i < lines.length; i++) {
-    if (!/^```\w*/.test(lines[i])) continue
-    const start = i
-    let before = start - 1
-    while (before >= 0 && !lines[before].trim()) before--
-    const end = lines.findIndex((l, j) => j > start && /^```\s*$/.test(l))
-    blocks.push({
-      line: start + 1,
-      code: lines.slice(start + 1, end).join('\n'),
-      marked: before >= 0 && /plan feature/i.test(lines[before]),
-    })
-    i = end
-  }
-  return blocks
-}
+const markedBlocks = (markdown: string) =>
+  codeBlocks(markdown).map((b) => ({
+    ...b,
+    marked: /plan feature/i.test(b.preceding),
+  }))
 
 describe('the README', () => {
-  const blocks = codeBlocks(README)
+  const blocks = markedBlocks(README)
 
   it('has code blocks to check', () => {
     expect(blocks.length).toBeGreaterThan(3)

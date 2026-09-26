@@ -8,6 +8,16 @@ React bindings for [@chaosity/location-client](https://www.npmjs.com/package/@ch
 npm install @chaosity/location-client-react @chaosity/location-client
 ```
 
+`maplibre-gl` is an optional peer, needed by `useMapLanguage` and the map
+examples, at 6.4.1 or a later 6.x release. Earlier releases carry
+[GHSA-jrc7-96c5-q579](https://github.com/advisories/GHSA-jrc7-96c5-q579), an
+XSS in the attribution control, and `@chaosity/location-client` 0.11.0 is the
+first core whose own peer admits 6. Under a bundler, MapLibre 6 runs its worker
+from a file your application serves, so a map needs `setWorkerUrl` once before
+it is built. The examples below serve it from `public/maplibre/`, and
+[The MapLibre worker](https://github.com/chaosity-io/location-service-client#the-maplibre-worker)
+in `@chaosity/location-client`'s README has the copy script and the Vite form.
+
 ## Quick Start
 
 ### 1. Create a Server Action to fetch config
@@ -86,6 +96,9 @@ React hook that keeps map label language in sync. Automatically reapplies after 
 
 ```tsx
 import { useMapLanguage } from '@chaosity/location-client-react'
+import * as maplibregl from 'maplibre-gl'
+
+maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs')
 
 function MapComponent() {
   const [mapInstance, setMapInstance] = useState<maplibregl.Map | null>(null)
@@ -260,8 +273,14 @@ import {
   fetchMapStyle,
   createTransformRequest,
 } from '@chaosity/location-client'
-import maplibregl from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import MaplibreGeocoder from '@maplibre/maplibre-gl-geocoder'
+import '@maplibre/maplibre-gl-geocoder/dist/maplibre-gl-geocoder.css'
+
+// Once, before the first map: the worker file the application serves (see
+// Installation).
+maplibregl.setWorkerUrl('/maplibre/maplibre-gl-worker.mjs')
 
 export default function MapComponent() {
   const mapContainer = useRef<HTMLDivElement>(null)
