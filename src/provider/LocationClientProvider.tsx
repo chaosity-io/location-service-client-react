@@ -56,10 +56,16 @@ export interface SendOptions {
  */
 export interface LocationClient {
   readonly config: { serviceId: string }
-  send<TInput, TOutput>(
-    command: TInput,
-    options?: SendOptions,
-  ): Promise<TOutput>
+  /**
+   * The core's own `send`, overloads and all, not a copy of it: from core
+   * 0.13.0, `await client.send(new AutocompleteCommand(…))` is an
+   * `AutocompleteCommandOutput` with nothing to annotate (core #68). A copy
+   * of the old `send<TInput, TOutput>` kept answering `unknown`, and nothing
+   * caught it — that one signature and the core's pair of overloads are
+   * assignable to each other both ways. Below 0.13.0 it is the core's old
+   * signature, as before.
+   */
+  send: GeoPlacesClient['send']
   /**
    * Verify a PlaceId through `POST /address/verify`: the full place record plus
    * `verified`, the one Places result an integrator may store (#26). A
@@ -454,6 +460,9 @@ export function LocationClientProvider({
     // this provider would have been silently discarded.
     const client: LocationClient = {
       config: baseClient.config,
+      // Typed by `LocationClient` above, so callers see the core's overloads
+      // and never this signature: a literal has no overload syntax, and one
+      // generic body with the cast satisfies both (core #68).
       async send<TInput, TOutput>(
         command: TInput,
         options?: SendOptions,

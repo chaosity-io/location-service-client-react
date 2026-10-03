@@ -133,11 +133,18 @@ that names a field the core dropped keeps passing (#24). Read the core's
 changes for what they removed, and look for it in `test/` by name.
 
 This bump is also when the provider has to follow the core. `LocationClient`
-and `SendOptions` restate the core client's surface by hand, and
+and `SendOptions` restate the core client's surface by hand — except `send`,
+which is `GeoPlacesClient['send']` itself (core #68) — and
 `test/core-surface.test.ts` compares them with the installed core's
 `GeoPlacesClient` using TypeScript's checker. It goes red naming each public
 member or `send` option the core has gained, as it did for `verifyAddress` and
-for `overallTimeoutMs`, which had been missing since core 0.8.0 (#26). Forward
+for `overallTimeoutMs`, which had been missing since core 0.8.0 (#26). That
+member comparison could not see a hand copy of `send` answering `unknown`
+while the core's inferred: one generic signature and the core's pair of
+overloads are assignable to each other both ways. So the same file compiles a
+`send` call per command against both and requires the same type. It is
+skipped, saying so, until the core devDependency is a core whose `send`
+infers (0.13.0), because before that both answer `unknown`. Forward
 a member that sends a request behind the client's `ready()` — the pre-send
 refresh, and the check that its configuration is still installed — as `send`
 and `verifyAddress` are. Forward a synchronous read bare, as `getAppConfig` is:
