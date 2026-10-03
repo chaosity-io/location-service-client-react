@@ -88,6 +88,11 @@ function SearchComponent() {
 }
 ```
 
+With `@chaosity/location-client` 0.13.0 or later, `client.send` resolves with
+the command's own output type, so the `SuggestCommandOutput` annotation above
+is optional. On an older core, `send` answers `unknown` unless the output type
+is named, as it is here.
+
 ## Map Utilities
 
 ### useMapLanguage
@@ -319,6 +324,8 @@ export default function MapComponent() {
         'top-right',
       )
 
+      // Type-checks with @chaosity/location-client 0.13.0 or later. An older
+      // core types GeoPlaces's client as GeoPlacesClient, and reports TS2345.
       const geoPlaces = new GeoPlaces(client, instance)
       const geocoder = new MaplibreGeocoder(geoPlaces, {
         maplibregl,
@@ -493,6 +500,11 @@ const response: SuggestCommandOutput = await client!.send(
   }),
 )
 ```
+
+Every `send` example in this README names the output type, so it compiles on
+every core the peer range admits. From `@chaosity/location-client` 0.13.0 the
+annotation is optional: `send` resolves with the command's own output type,
+and the core's `CommandOutput<C>` names it when you need it.
 
 ## License
 
