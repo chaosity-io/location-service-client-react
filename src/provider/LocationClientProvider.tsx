@@ -107,6 +107,17 @@ interface LocationClientContextValue {
   client: LocationClient | null
   getToken: () => string | undefined
   /**
+   * Ask for a new token after the API refused the one `getToken` returned, for
+   * requests the client does not make itself: a map's style and tiles (#47).
+   * With `@chaosity/location-client` 0.13.0, pass `{ getToken, refreshToken }`
+   * to `fetchMapStyle`, `fetchStaticMap` and `refreshTokenOnUnauthorized`. It
+   * is the refresh a send's 401 makes, so it shares any refresh in flight and
+   * waits out the same holds, and resolves to what `getToken` returns after.
+   * It rejects once its configuration is replaced, and with the refresh's own
+   * error when the refresh fails, as `send` does.
+   */
+  refreshToken: () => Promise<string | undefined>
+  /**
    * The API `client` talks to, from the same `getConfig` answer as the token
    * `getToken` returns (#14). Build a map's style and tile URLs from this
    * rather than restating the URL, so a map and its token cannot come from two
@@ -237,7 +248,8 @@ interface Hold {
  *   its token for every tile.
  * - `user`: the tab or the network coming back. Overrides our own backoff,
  *   which was only a guess and is now out of date, but never `Retry-After`.
- * - `rejected`: the API refused the token (the core's `refreshToken`).
+ * - `rejected`: the API refused the token (the core's `refreshToken`, and the
+ *   context's own for a map, #47).
  *   Overrides #35's floor, because a 401 is the server's word where the floor
  *   is only this clock's. Never a failure: asking a failing token route once
  *   per request is #36 over again.
@@ -290,6 +302,15 @@ interface ConfigState {
    * one built at mount has to read the token with the function it got then.
    */
   getToken: () => string | undefined
+  /**
+   * The map path's way to replace a refused token (#47): the `rejected`
+   * refresh, as the client's own `refreshToken` makes it. The same function
+   * for as long as this configuration is live, like `getToken`, so a
+   * `{ getToken, refreshToken }` a map was built with stays one object, and
+   * the core's hold on it stays one hold. Rejects once replaced, and when the
+   * refresh fails.
+   */
+  refreshToken: () => Promise<string | undefined>
 }
 
 type Refs = {
@@ -327,6 +348,12 @@ function newConfig(key: ConfigKey, refs: Refs): ConfigState {
       if (state.token && isStale(state) && !state.attempt) {
         void refs.refresh.current('auto').catch(() => {})
       }
+      return state.token
+    },
+    refreshToken: async () => {
+      if (refs.config.current !== state) throw replacedError()
+      await refs.refresh.current('rejected')
+      if (refs.config.current !== state) throw replacedError()
       return state.token
     },
   }
@@ -718,6 +745,7 @@ export function LocationClientProvider({
     () => ({
       client: session?.client ?? null,
       getToken: config.getToken,
+      refreshToken: config.refreshToken,
       apiUrl: session?.apiUrl ?? null,
       loading,
       error,

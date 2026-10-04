@@ -199,9 +199,10 @@ on the consumer's server, not in this library.
   only if someone remembers to, which is how a switch used to keep the old
   token and URL. For the same reason, every function the provider hands out
   checks that its configuration is still the installed one: the client's
-  methods and `getToken`. Once it is not, a request refuses, and a synchronous
-  read answers empty (`getToken()` → `undefined`, `getAppConfig()` → `{}`)
-  rather than throwing, because a consumer calls those while rendering.
+  methods, `getToken` and `refreshToken`. Once it is not, a request refuses,
+  `refreshToken()` included, and a synchronous read answers empty
+  (`getToken()` → `undefined`, `getAppConfig()` → `{}`) rather than throwing,
+  because a consumer calls those while rendering.
 - **`getConfig` is called in one place, `refresh`.** Each outcome decides when
   the next attempt may start, and a caller says who it is with a `Trigger`,
   which decides whether a hold stops it (#34, #35, #36). Every call site that
