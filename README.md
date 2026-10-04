@@ -179,13 +179,13 @@ Without either, the provider goes on using the old configuration until its
 next token refresh, up to 14 minutes later. A new `getConfig` function is not
 a signal on its own, because it is usually a new function on every render.
 
-After a switch, a client or `getToken` kept from before it refuses: `send()`
-and `verifyAddress()` reject, `getToken()` returns `undefined`, and
-`getAppConfig()` answers `{}`. So one configuration's token never reaches
-another's URL. Build anything that holds
-on to them, such as a MapLibre map or a geocoder, from the context's current
-values, and rebuild it when `client`, `getToken` or `apiUrl` changes, as the
-[complete example](#complete-example-with-maplibre) does. The same happens
+After a switch, a client, `getToken` or `refreshToken` kept from before it
+refuses: `send()`, `verifyAddress()` and `refreshToken()` reject, `getToken()`
+returns `undefined`, and `getAppConfig()` answers `{}`. So one configuration's
+token never reaches another's URL. Build anything that holds on to them, such
+as a MapLibre map or a geocoder, from the context's current values, and
+rebuild it when `client`, `getToken`, `refreshToken` or `apiUrl` changes, as
+the [complete example](#complete-example-with-maplibre) does. The same happens
 without a `configKey` when `getConfig` starts answering with a different
 `apiUrl`.
 
@@ -194,13 +194,15 @@ without a `configKey` when `getConfig` starts answering with a different
 Hook to access the location client in any component.
 
 ```tsx
-const { client, getToken, apiUrl, loading, error } = useLocationClient()
+const { client, getToken, refreshToken, apiUrl, loading, error } =
+  useLocationClient()
 ```
 
 **Returns:**
 
 - `client` (`LocationClient | null`) — The location client. Not a bare `GeoPlacesClient`: the provider wraps it so `send()` and `verifyAddress()` refresh the token first when they need to, and retry once if the API rejects it.
 - `getToken` (`() => string | undefined`) — Returns the current token, for requests the client does not make itself, such as a map's style, tiles and glyphs. It is available before the first token arrives and stays the same function afterwards, so a map built early reads the token once it lands. It returns `undefined` once `configKey` changes.
+- `refreshToken` (`() => Promise<string | undefined>`) — Asks for a new token after the API refused the one `getToken` returned, for the requests the client does not make itself. Hand `{ getToken, refreshToken }` to `@chaosity/location-client` 0.13.0's map helpers, as the [MapLibre example](#complete-example-with-maplibre) does, and a map recovers from a refused token without a reload. It is the refresh `send()` makes after a 401: it shares a refresh in flight, waits out the same holds, and resolves to what `getToken` returns afterwards. It rejects once `configKey` changes, and with the refresh's own error when the refresh fails, as `send()` does. Since 0.10.1.
 - `apiUrl` (`string | null`) — The API `client` talks to, from the same `getConfig` answer as the token. Build map URLs from it rather than restating the URL. `null` until a configuration has loaded.
 - `loading` (`boolean`) — Whether the client is initializing. `true` again while a new `configKey` loads.
 - `error` (`string | null`) — Error message if initialization or a token refresh failed. The provider keeps retrying, and `error` returns to `null` on the first success (see [Token Refresh](#token-refresh)).
@@ -226,7 +228,11 @@ The provider owns the token lifecycle. There is nothing to manage manually.
    other reason to replace that token, so without this the failures continue
    until the timer next comes around: for a token with 14 minutes left, 14
    minutes of a broken page. The core added this in 0.7.0, so every core this
-   package's peer range admits has it.
+   package's peer range admits has it. A map's own requests recover the same
+   way, with `@chaosity/location-client` 0.13.0 or later, when it is built with
+   `{ getToken, refreshToken }` and `refreshTokenOnUnauthorized`, as the
+   [complete example](#complete-example-with-maplibre) is; built with
+   `getToken` alone, a refused tile stays refused until the timer.
 
    Since 0.10.0 that refresh calls `getConfig({ refusedToken })`. Your server
    has to act on it: `getClientConfig()` keeps one token per application and,
@@ -294,7 +300,7 @@ request rejects with the refresh error too.
 ```tsx
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   useLocationClient,
   useMapLanguage,
@@ -303,6 +309,7 @@ import {
   GeoPlaces,
   fetchMapStyle,
   createTransformRequest,
+  refreshTokenOnUnauthorized,
 } from '@chaosity/location-client'
 import * as maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -319,7 +326,14 @@ export default function MapComponent() {
   const [mapInstance, setMapInstance] = useState<maplibregl.Map | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
   const [language, setLanguage] = useState('en')
-  const { client, getToken, apiUrl, loading, error } = useLocationClient()
+  const { client, getToken, refreshToken, apiUrl, loading, error } =
+    useLocationClient()
+  // One object for the configuration's life: the core keeps its hold on a
+  // refused token per object, and both functions stay the same until then.
+  const tokens = useMemo(
+    () => ({ getToken, refreshToken }),
+    [getToken, refreshToken],
+  )
 
   // Keeps map labels in sync with language — reapplies after every setStyle() call
   useMapLanguage(mapInstance, language)
@@ -327,10 +341,13 @@ export default function MapComponent() {
   useEffect(() => {
     if (!mapContainer.current || map.current || loading || !client || !apiUrl)
       return
+    let stopRefreshing: (() => void) | undefined
     ;(async () => {
       // Fetch the style with the language baked into the descriptor. The URL
-      // comes from the context with the token, so the two always belong together.
-      const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
+      // comes from the context with the token, so the two always belong
+      // together. With `tokens`, a refused descriptor is asked for once more
+      // with a new token (@chaosity/location-client 0.13.0).
+      const style = await fetchMapStyle(apiUrl, 'Standard', tokens, {
         colorScheme: 'Light',
         language,
       })
@@ -344,6 +361,9 @@ export default function MapComponent() {
       })
       // Held at once, so the catch and the cleanup below can remove it
       map.current = instance
+      // A tile the API refuses asks the provider for a new token, and is
+      // reloaded with it.
+      stopRefreshing = refreshTokenOnUnauthorized(instance, apiUrl, tokens)
 
       instance.addControl(
         new maplibregl.NavigationControl({ visualizePitch: true }),
@@ -365,19 +385,21 @@ export default function MapComponent() {
       // A refused style request lands here, and its message says why — for
       // an option outside the application's plan, it names the feature.
       // Anything that failed after the map was built removes it too.
+      stopRefreshing?.()
       map.current?.remove()
       map.current = null
       setMapError(err instanceof Error ? err.message : String(err))
     })
 
     return () => {
+      stopRefreshing?.()
       if (map.current) {
         map.current.remove()
         map.current = null
         setMapInstance(null)
       }
     }
-  }, [client, getToken, apiUrl, loading])
+  }, [client, getToken, tokens, apiUrl, loading])
 
   if (error) return <div>Error: {error}</div>
   if (mapError) return <div>Map unavailable: {mapError}</div>
@@ -392,7 +414,7 @@ one refuses the style request with 403 `FeatureNotEntitledException`, which the
 `catch` above puts on screen. 3D terrain and buildings need the `terrain` and `buildings` plan features:
 
 ```tsx
-const style = await fetchMapStyle(apiUrl, 'Standard', getToken, {
+const style = await fetchMapStyle(apiUrl, 'Standard', tokens, {
   colorScheme: 'Light',
   terrain: 'Terrain3D',
   buildings: 'Buildings3D',
