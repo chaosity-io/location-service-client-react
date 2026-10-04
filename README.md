@@ -28,9 +28,16 @@ in `@chaosity/location-client`'s README has the copy script and the Vite form.
 
 import { getClientConfig } from '@chaosity/location-client/server'
 
-export async function getLocationConfig() {
+export async function getLocationConfig(request?: { refusedToken?: string }) {
   // Auto-reads LOCATION_API_URL, LOCATION_CLIENT_ID, LOCATION_CLIENT_SECRET
-  return await getClientConfig()
+  const config = await getClientConfig()
+  // The API refused this token before its expiry (revoked, or its secret
+  // rotated). getClientConfig() keeps one token per application, so replace
+  // it, but only when it is the one refused: see Token Refresh, step 5.
+  // `request` is optional: it arrives from the browser, and only after a 401.
+  return request?.refusedToken === config.token
+    ? getClientConfig({ forceRefresh: true })
+    : config
 }
 ```
 
@@ -146,7 +153,7 @@ Provides the location client and automatic token refresh to all child components
 
 **Props:**
 
-- `getConfig` — Async function that returns `{ apiUrl: string, token: string, expiresAt?: number }`. Called on mount, whenever the token needs refreshing, and to retry a call that failed (see [Token Refresh](#token-refresh)).
+- `getConfig` — Async function that returns `{ apiUrl: string, token: string, expiresAt?: number }`. Called on mount, whenever the token needs refreshing, and to retry a call that failed (see [Token Refresh](#token-refresh)). After the API refuses a token it is called with `{ refusedToken }`, the token refused; every other call passes nothing. An answer without a non-empty `token` and `apiUrl` is treated as a failure, as a rejection is.
 - `configKey` — Optional. What `getConfig` answers for, such as an organisation or application id. When it changes, the provider drops the old client, token and `apiUrl`, calls `getConfig` again and hands out a new client, without remounting its children.
 - `children` — Child components.
 
@@ -220,8 +227,22 @@ The provider owns the token lifecycle. There is nothing to manage manually.
    until the timer next comes around: for a token with 14 minutes left, 14
    minutes of a broken page. The core added this in 0.7.0, so every core this
    package's peer range admits has it.
+
+   Since 0.10.0 that refresh calls `getConfig({ refusedToken })`. Your server
+   has to act on it: `getClientConfig()` keeps one token per application and,
+   asked again, hands back the one just refused, so nothing is retried until
+   its cache comes round on its own (measured: almost ten minutes). Replace the
+   cached token only when it is the refused one, as the Quick Start does: that
+   mints once per refused token, however many visitors report it, and nothing
+   for a report of any other token. It does not stop a visitor echoing the
+   token it was just handed to make your server mint again; rate-limit the
+   action if that matters.
+
 6. Concurrent refreshes are deduplicated — everything waiting shares one call to
-   `getConfig`.
+   `getConfig`. A 401 that lands while a scheduled refresh is in flight shares
+   that call too, which names no token, so the refused one is named on the
+   next 401: at the next `send()` on a core below 0.12.0, and after the core's
+   30-second hold from 0.12.0.
 7. A failed `getConfig` is retried on the provider's own timer, backing off
    exponentially from 1 to 30 seconds, with jitter. When `getConfig` rejects
    with an error that has `retryAfterMs` (milliseconds), it waits that long
@@ -235,8 +256,13 @@ The provider owns the token lifecycle. There is nothing to manage manually.
    there:
 
    ```ts
-   async function getConfig() {
-     const res = await fetch('/api/location-token')
+   async function getConfig(request?: { refusedToken: string }) {
+     // In the body, not the URL, so the token stays out of access logs.
+     const res = await fetch('/api/location-token', {
+       method: 'POST',
+       headers: { 'content-type': 'application/json' },
+       body: JSON.stringify(request ?? {}),
+     })
      if (!res.ok) {
        const retryAfter = Number(res.headers.get('retry-after'))
        throw Object.assign(new Error(`token route answered ${res.status}`), {

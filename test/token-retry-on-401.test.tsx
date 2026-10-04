@@ -190,8 +190,10 @@ describe('while the token route is failing (#36)', () => {
 
     // The mount, and the first 401's refresh. Not the second 401's.
     expect(getConfig).toHaveBeenCalledTimes(2)
-    // One request per send, neither retried.
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // The first send's request only. The core (0.12.0 and later) remembers
+    // the token the API refused while the refresh that followed failed, so
+    // the second send does not send it again (#42).
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -124,7 +124,32 @@ const LocationClientContext = createContext<
 
 export interface LocationClientProviderProps {
   children: ReactNode
-  getConfig: () => Promise<ClientConfig & { expiresAt?: number }>
+  /**
+   * Where the token and `apiUrl` come from: usually a server action returning
+   * `getClientConfig()`.
+   *
+   * After the API refuses a token before its `exp` (a revoked token, or a
+   * rotated secret), it is asked with `{ refusedToken }`, the token refused
+   * (#43). `getClientConfig()` caches one token per application, so a server
+   * that ignores this hands the refused token back, and the page stays broken
+   * until that cache comes round on its own. Ask for a new one only when the
+   * cached token IS the refused one:
+   *
+   *     return request?.refusedToken === config.token
+   *       ? getClientConfig({ forceRefresh: true })
+   *       : config
+   *
+   * That mints once per refused token, and nothing for a report of any other.
+   * It does not stop a caller echoing the token it was just handed, so a
+   * server worried about that rate-limits the call. Every other call passes
+   * nothing, and a `getConfig` that ignores the argument works as before.
+   *
+   * An answer without a non-empty `token` and `apiUrl` is taken as a failure
+   * (#39), as a rejection is.
+   */
+  getConfig: (request?: {
+    refusedToken: string
+  }) => Promise<ClientConfig & { expiresAt?: number }>
   /**
    * What `getConfig` answers for: an organisation or application id.
    *
@@ -182,6 +207,9 @@ function retryAfterOf(err: unknown): number | undefined {
     ?.retryAfterMs
   return typeof ms === 'number' && ms > 0 ? ms : undefined
 }
+
+const isFilled = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0
 
 /** Why no new call to `getConfig` may start yet, and until when. */
 interface Hold {
@@ -433,7 +461,9 @@ export function LocationClientProvider({
        *
        * The client awaits this after a 401 and retries the request once with
        * what it returns; the same token, or nothing, means no retry, so a
-       * doomed request is never sent — or billed — twice.
+       * doomed request is never sent — or billed — twice. The `rejected`
+       * trigger names the refused token to `getConfig` (#43): a server that
+       * caches one token returns it again unless told which one was refused.
        *
        * @chaosity/location-client 0.8.0 and later also calls it BEFORE the
        * first send when it holds no token at all. Here that means this client
@@ -525,10 +555,30 @@ export function LocationClientProvider({
       }
 
       log('Asking getConfig (%s)', trigger)
+      // The token the API refused, so a server that caches one can replace
+      // exactly that one (#43). Named on no other trigger, where the call
+      // stays argument-less. A `rejected` call that finds an attempt in
+      // flight joins it above and names nothing, and the next 401 names it:
+      // at the next send below core 0.12.0, and after that core's 30 s hold
+      // on the refused token from 0.12.0. The core's `refreshToken` takes no
+      // argument, so `state.token` stands for the token it sent.
+      const refused = trigger === 'rejected' ? state.token : undefined
+      const request: [] | [{ refusedToken: string }] = refused
+        ? [{ refusedToken: refused }]
+        : []
       const attempt = (async () => {
         let cfg: ClientConfig & { expiresAt?: number }
         try {
-          cfg = await getConfigRef.current()
+          cfg = await getConfigRef.current(...request)
+          // A token route's error body passed through `res.json()` resolves
+          // too (#39). Installing it published a client for no URL, and an
+          // `error` of null, so it fails here as a rejection does.
+          const missing = !isFilled(cfg?.token)
+            ? 'a token'
+            : !isFilled(cfg?.apiUrl)
+              ? 'an apiUrl'
+              : null
+          if (missing) throw new Error(`getConfig resolved without ${missing}`)
         } catch (err) {
           if (configRef.current !== state) throw replacedError()
           state.strikes += 1
